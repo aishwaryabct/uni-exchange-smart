@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { deleteListingFromFirestore, saveListingToFirestore, subscribeToListings } from "../firebase";
 import { currentUser, getStudent, seedListings, seedReviews, seedThreads } from "./data";
 import type { Listing, Review, Thread } from "./types";
 
@@ -106,11 +107,13 @@ export const actions = {
       postedHours: 0,
     };
     setState((s) => ({ ...s, listings: [listing, ...s.listings] }));
+    void saveListingToFirestore(listing);
     return id;
   },
 
   removeListing(id: string) {
     setState((s) => ({ ...s, listings: s.listings.filter((l) => l.id !== id) }));
+    void deleteListingFromFirestore(id);
   },
 
   sendMessage(threadId: string, text: string) {
@@ -230,3 +233,21 @@ export const actions = {
     }));
   },
 };
+
+// Real-time synchronization with Firestore listings
+if (typeof window !== "undefined") {
+  subscribeToListings((remoteListings) => {
+    if (!remoteListings || remoteListings.length === 0) return;
+    setState((s) => {
+      const map = new Map<string, Listing>();
+      // Place existing listings in map
+      s.listings.forEach((l) => map.set(l.id, l));
+      // Overwrite/add remote listings from Firestore
+      remoteListings.forEach((l) => map.set(l.id, l));
+      return {
+        ...s,
+        listings: Array.from(map.values()),
+      };
+    });
+  });
+}
