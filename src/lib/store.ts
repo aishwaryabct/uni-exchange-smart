@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { currentUser, seedListings, seedReviews, seedThreads } from "./data";
+import { currentUser, getStudent, seedListings, seedReviews, seedThreads } from "./data";
 import type { Listing, Review, Thread } from "./types";
 
 interface AppState {
@@ -163,7 +163,7 @@ export const actions = {
     const review: Review = {
       id: nextId("rv"),
       fromId: thread.studentId,
-      fromName: "Exchange partner",
+      fromName: getStudent(thread.studentId).name,
       rating,
       text: reviewText.trim() || "Completed an exchange on REXchange.",
       date: "Just now",

@@ -46,12 +46,12 @@ export interface Listing {
   category: Category;
   condition: string;
   type: ListingType;
-  price?: number;
-  exchangePref?: string;
+  price?: number | undefined;
+  exchangePref?: string | undefined;
   department: string;
   year: string;
   availability: string;
-  image?: string;
+  image?: string | undefined;
   postedHours: number;
   keywords: string[];
 }
