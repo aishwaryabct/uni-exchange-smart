@@ -10,8 +10,8 @@ export function ListingCard({
   delay = 0,
 }: {
   listing: Listing;
-  matchScore?: number;
-  delay?: number;
+  matchScore?: number | undefined;
+  delay?: number | undefined;
 }) {
   const owner = getStudent(listing.ownerId);
 

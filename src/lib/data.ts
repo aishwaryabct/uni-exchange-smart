@@ -14,15 +14,15 @@ import imgStatsBook from "@/assets/listing-stats-book.jpg";
 
 export const currentUser: Student = {
   id: "u0",
-  name: "Alex Rivera",
-  initials: "AR",
+  name: "Aishwarya",
+  initials: "A",
   color: "#6366f1",
   department: "Computer Science",
   year: "Year 3",
   rating: 4.9,
   exchanges: 18,
   joined: "Sep 2024",
-  bio: "CS junior who trades more than he buys. Into photography, hackathons, and keeping good gear in circulation. North Campus, usually near the ACM lab.",
+  bio: "CS junior who trades more than she buys. Into photography, hackathons, and keeping good gear in circulation. North Campus, usually near the ACM lab.",
 };
 
 export const students: Student[] = [
@@ -201,7 +201,7 @@ export const seedListings: Listing[] = [
     category: "Event Tickets",
     condition: "New",
     type: "sell",
-    price: 45,
+    price: 1200,
     department: "Business",
     year: "Year 2",
     availability: "Instant QR transfer, anytime",
@@ -252,7 +252,7 @@ export const seedListings: Listing[] = [
     category: "Books",
     condition: "Very good",
     type: "sell",
-    price: 18,
+    price: 650,
     department: "Mathematics",
     year: "Year 5",
     availability: "Weekends · Main Hall steps",
@@ -285,7 +285,7 @@ export const seedListings: Listing[] = [
     category: "Gear & Lifestyle",
     condition: "Good",
     type: "sell",
-    price: 80,
+    price: 4500,
     department: "Music",
     year: "Year 1",
     availability: "Evenings · West dorm lobby",
@@ -423,13 +423,13 @@ export const seedThreads: Thread[] = [
       {
         id: "m1",
         fromId: "u1",
-        text: "Hey Alex! Saw your Bose QC35 listing — that's exactly what I'm after. Would you trade for the A6000? I can add cash on top.",
+        text: "Hey Aishwarya! Saw your Bose QC35 listing — that's exactly what I'm after. Would you trade for the A6000? I can add cash on top.",
         time: "10:24",
       },
       {
         id: "m2",
         fromId: "u0",
-        text: "Hi Marcus! Tempting. Could you do the camera + $60? The QC35s have brand new ear pads.",
+        text: "Hi Marcus! Tempting. Could you do the camera + ₹4,000? The QC35s have brand new ear pads.",
         time: "10:31",
       },
       {
@@ -473,7 +473,7 @@ export const seedThreads: Thread[] = [
       {
         id: "m6",
         fromId: "u7",
-        text: "Hi Alex! Studio lighting is terrible and your lamp would save my eyes during model season. Could I pick it up Thursday? I can bring graph paper pads as a thank-you 🙏",
+        text: "Hi Aishwarya! Studio lighting is terrible and your lamp would save my eyes during model season. Could I pick it up Thursday? I can bring graph paper pads as a thank-you 🙏",
         time: "09:12",
       },
     ],
@@ -530,7 +530,7 @@ export const seedReviews: Review[] = [
     fromId: "u6",
     fromName: "Priya Nair",
     rating: 5,
-    text: "Smooth swap — the lamp was exactly as described and Alex even threw in a spare bulb. Great communication.",
+    text: "Smooth swap — the lamp was exactly as described and Aishwarya even threw in a spare bulb. Great communication.",
     date: "Last week",
   },
   {
@@ -546,7 +546,7 @@ export const seedReviews: Review[] = [
     fromId: "u4",
     fromName: "Elena Garcia",
     rating: 4,
-    text: "Bought my spare hackathon ticket from Alex. Quick QR transfer, zero hassle.",
+    text: "Bought my spare hackathon ticket from Aishwarya. Quick QR transfer, zero hassle.",
     date: "Last month",
   },
   {
@@ -554,7 +554,7 @@ export const seedReviews: Review[] = [
     fromId: "u2",
     fromName: "Jasmine Wu",
     rating: 5,
-    text: "Alex picked up my chem notes right on time and was super friendly. Would trade again!",
+    text: "Aishwarya picked up my chem notes right on time and was super friendly. Would trade again!",
     date: "Last month",
   },
 ];

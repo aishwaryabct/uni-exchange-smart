@@ -9,17 +9,64 @@ interface AppState {
   completedThisSession: number;
 }
 
-let state: AppState = {
+const STORAGE_KEY = "rexchange_app_state_v2";
+
+function loadInitialState(): AppState {
+  if (typeof window === "undefined") {
+    return {
+      listings: seedListings,
+      threads: seedThreads,
+      reviews: seedReviews,
+      completedThisSession: 0,
+    };
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.listings) && Array.isArray(parsed.threads)) {
+        return {
+          listings: parsed.listings.length > 0 ? parsed.listings : seedListings,
+          threads: parsed.threads.length > 0 ? parsed.threads : seedThreads,
+          reviews: Array.isArray(parsed.reviews) && parsed.reviews.length > 0 ? parsed.reviews : seedReviews,
+          completedThisSession: typeof parsed.completedThisSession === "number" ? parsed.completedThisSession : 0,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to load state from localStorage:", err);
+  }
+  return {
+    listings: seedListings,
+    threads: seedThreads,
+    reviews: seedReviews,
+    completedThisSession: 0,
+  };
+}
+
+const serverSnapshot: AppState = {
   listings: seedListings,
   threads: seedThreads,
   reviews: seedReviews,
   completedThisSession: 0,
 };
 
+let state: AppState = loadInitialState();
+
 const listeners = new Set<() => void>();
+
+function saveState(s: AppState) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch (err) {
+    console.warn("Failed to save state to localStorage:", err);
+  }
+}
 
 function setState(updater: (s: AppState) => AppState) {
   state = updater(state);
+  saveState(state);
   listeners.forEach((l) => l());
 }
 
@@ -30,14 +77,12 @@ export function useAppState(): AppState {
       return () => listeners.delete(cb);
     },
     () => state,
-    () => state,
+    () => serverSnapshot,
   );
 }
 
-let counter = 100;
 function nextId(prefix: string) {
-  counter += 1;
-  return `${prefix}${counter}`;
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
 const cannedReplies = [
@@ -173,6 +218,15 @@ export const actions = {
       threads: s.threads.map((t) => (t.id === threadId ? { ...t, status: "completed" } : t)),
       reviews: [review, ...s.reviews],
       completedThisSession: s.completedThisSession + 1,
+    }));
+  },
+
+  resetData() {
+    setState(() => ({
+      listings: seedListings,
+      threads: seedThreads,
+      reviews: seedReviews,
+      completedThisSession: 0,
     }));
   },
 };

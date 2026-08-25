@@ -91,7 +91,7 @@ export function StarInput({
 export function priceLabel(listing: Listing): string {
   switch (listing.type) {
     case "sell":
-      return listing.price != null ? `$${listing.price}` : "For sale";
+      return listing.price != null ? `₹${listing.price.toLocaleString("en-IN")}` : "For sale";
     case "exchange":
       return "Open to swap";
     case "giveaway":

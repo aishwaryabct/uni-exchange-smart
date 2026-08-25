@@ -9,9 +9,9 @@ import { actions, useAppState } from "@/lib/store";
 export const Route = createFileRoute("/_app/profile")({
   head: () => ({
     meta: [
-      { title: "Alex Rivera — Profile & Reputation — REXchange" },
+      { title: "Aishwarya — Profile & Reputation — REXchange" },
       { name: "description", content: "Student profile with active listings, completed exchanges, and campus reputation reviews." },
-      { property: "og:title", content: "Alex Rivera — REXchange" },
+      { property: "og:title", content: "Aishwarya — REXchange" },
       { property: "og:description", content: "Student profile, listings, and reputation." },
     ],
   }),

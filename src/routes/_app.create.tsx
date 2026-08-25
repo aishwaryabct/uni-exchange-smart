@@ -206,7 +206,7 @@ function CreateListingPage() {
           {showPrice && (
             <div>
               <label htmlFor="price" className={labelCls}>
-                Price ($)
+                Price (₹)
               </label>
               <input
                 id="price"
@@ -214,7 +214,7 @@ function CreateListingPage() {
                 min="0"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
-                placeholder="25"
+                placeholder="500"
                 className={inputCls}
               />
             </div>
@@ -229,7 +229,7 @@ function CreateListingPage() {
                 id="exchangePref"
                 value={exchangePref}
                 onChange={(e) => setExchangePref(e.target.value)}
-                placeholder="e.g. a mechanical keyboard, tutoring hours, or $20"
+                placeholder="e.g. a mechanical keyboard, tutoring hours, or ₹500"
                 className={inputCls}
               />
             </div>
