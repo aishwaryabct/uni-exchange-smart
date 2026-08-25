@@ -68,7 +68,7 @@ export type ThreadStatus = "active" | "pending" | "accepted" | "declined" | "com
 export interface Thread {
   id: string;
   studentId: string;
-  listingId?: string;
+  listingId?: string | undefined;
   kind: "chat" | "request";
   status: ThreadStatus;
   subject: string;

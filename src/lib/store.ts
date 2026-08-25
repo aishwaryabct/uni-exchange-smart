@@ -85,7 +85,9 @@ export const actions = {
     // Simulated reply for the demo
     const thread = state.threads.find((t) => t.id === threadId);
     if (thread) {
-      const replyText = cannedReplies[Math.floor(Math.random() * cannedReplies.length)];
+      const replyText =
+        cannedReplies[Math.floor(Math.random() * cannedReplies.length)] ??
+        "Sounds good! When works for you?";
       window.setTimeout(() => {
         setState((s) => ({
           ...s,
