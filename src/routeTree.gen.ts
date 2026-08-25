@@ -10,33 +10,129 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as AppCreateRouteImport } from './routes/_app.create'
+import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppExploreRouteImport } from './routes/_app.explore'
+import { Route as AppMatchesRouteImport } from './routes/_app.matches'
+import { Route as AppMessagesRouteImport } from './routes/_app.messages'
+import { Route as AppProfileRouteImport } from './routes/_app.profile'
+import { Route as AppListingIdRouteImport } from './routes/_app.listing.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppCreateRoute = AppCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExploreRoute = AppExploreRouteImport.update({
+  id: '/explore',
+  path: '/explore',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMatchesRoute = AppMatchesRouteImport.update({
+  id: '/matches',
+  path: '/matches',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppMessagesRoute = AppMessagesRouteImport.update({
+  id: '/messages',
+  path: '/messages',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfileRoute = AppProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppListingIdRoute = AppListingIdRouteImport.update({
+  id: '/listing/$id',
+  path: '/listing/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/create': typeof AppCreateRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/explore': typeof AppExploreRoute
+  '/matches': typeof AppMatchesRoute
+  '/messages': typeof AppMessagesRoute
+  '/profile': typeof AppProfileRoute
+  '/listing/$id': typeof AppListingIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/create': typeof AppCreateRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/explore': typeof AppExploreRoute
+  '/matches': typeof AppMatchesRoute
+  '/messages': typeof AppMessagesRoute
+  '/profile': typeof AppProfileRoute
+  '/listing/$id': typeof AppListingIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/_app/create': typeof AppCreateRoute
+  '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/explore': typeof AppExploreRoute
+  '/_app/matches': typeof AppMatchesRoute
+  '/_app/messages': typeof AppMessagesRoute
+  '/_app/profile': typeof AppProfileRoute
+  '/_app/listing/$id': typeof AppListingIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/create'
+    | '/dashboard'
+    | '/explore'
+    | '/matches'
+    | '/messages'
+    | '/profile'
+    | '/listing/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/create'
+    | '/dashboard'
+    | '/explore'
+    | '/matches'
+    | '/messages'
+    | '/profile'
+    | '/listing/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/_app/create'
+    | '/_app/dashboard'
+    | '/_app/explore'
+    | '/_app/matches'
+    | '/_app/messages'
+    | '/_app/profile'
+    | '/_app/listing/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +144,90 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/create': {
+      id: '/_app/create'
+      path: '/create'
+      fullPath: '/create'
+      preLoaderRoute: typeof AppCreateRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/explore': {
+      id: '/_app/explore'
+      path: '/explore'
+      fullPath: '/explore'
+      preLoaderRoute: typeof AppExploreRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/matches': {
+      id: '/_app/matches'
+      path: '/matches'
+      fullPath: '/matches'
+      preLoaderRoute: typeof AppMatchesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/messages': {
+      id: '/_app/messages'
+      path: '/messages'
+      fullPath: '/messages'
+      preLoaderRoute: typeof AppMessagesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/profile': {
+      id: '/_app/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/listing/$id': {
+      id: '/_app/listing/$id'
+      path: '/listing/$id'
+      fullPath: '/listing/$id'
+      preLoaderRoute: typeof AppListingIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
+interface AppRouteChildren {
+  AppCreateRoute: typeof AppCreateRoute
+  AppDashboardRoute: typeof AppDashboardRoute
+  AppExploreRoute: typeof AppExploreRoute
+  AppMatchesRoute: typeof AppMatchesRoute
+  AppMessagesRoute: typeof AppMessagesRoute
+  AppProfileRoute: typeof AppProfileRoute
+  AppListingIdRoute: typeof AppListingIdRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppCreateRoute: AppCreateRoute,
+  AppDashboardRoute: AppDashboardRoute,
+  AppExploreRoute: AppExploreRoute,
+  AppMatchesRoute: AppMatchesRoute,
+  AppMessagesRoute: AppMessagesRoute,
+  AppProfileRoute: AppProfileRoute,
+  AppListingIdRoute: AppListingIdRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
