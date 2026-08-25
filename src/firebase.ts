@@ -11,18 +11,18 @@ import {
   type Firestore,
   type Unsubscribe,
 } from "firebase/firestore";
+import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
 import type { Listing } from "./lib/types";
 
-// Firebase web configuration
-// Populate these in your .env file or replace directly with your Firebase Console web config
+// Firebase web configuration provided by the user
 export const firebaseConfig = {
-  apiKey: import.meta.env["VITE_FIREBASE_API_KEY"] || "",
-  authDomain: import.meta.env["VITE_FIREBASE_AUTH_DOMAIN"] || "",
-  projectId: import.meta.env["VITE_FIREBASE_PROJECT_ID"] || "",
-  storageBucket: import.meta.env["VITE_FIREBASE_STORAGE_BUCKET"] || "",
-  messagingSenderId: import.meta.env["VITE_FIREBASE_MESSAGING_SENDER_ID"] || "",
-  appId: import.meta.env["VITE_FIREBASE_APP_ID"] || "",
-  measurementId: import.meta.env["VITE_FIREBASE_MEASUREMENT_ID"] || "",
+  apiKey: import.meta.env["VITE_FIREBASE_API_KEY"] || "AIzaSyDqIc3WP_AeRBBWmyKEQUhTx58xRNhlCGM",
+  authDomain: import.meta.env["VITE_FIREBASE_AUTH_DOMAIN"] || "workspace-8a6f1.firebaseapp.com",
+  projectId: import.meta.env["VITE_FIREBASE_PROJECT_ID"] || "workspace-8a6f1",
+  storageBucket: import.meta.env["VITE_FIREBASE_STORAGE_BUCKET"] || "workspace-8a6f1.firebasestorage.app",
+  messagingSenderId: import.meta.env["VITE_FIREBASE_MESSAGING_SENDER_ID"] || "962874559602",
+  appId: import.meta.env["VITE_FIREBASE_APP_ID"] || "1:962874559602:web:8317d0feb3daf10bf846eb",
+  measurementId: import.meta.env["VITE_FIREBASE_MEASUREMENT_ID"] || "G-34F57YVKME",
 };
 
 export function isFirebaseConfigured(): boolean {
@@ -37,17 +37,29 @@ export function isFirebaseConfigured(): boolean {
 // Initialize Firebase App (singleton across HMR / SSR)
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
+let analytics: Analytics | null = null;
 
 try {
   if (isFirebaseConfigured()) {
     app = getApps().length > 0 ? getApps()[0]! : initializeApp(firebaseConfig);
     db = getFirestore(app);
+
+    // Initialize Analytics if supported in the current browser environment
+    if (typeof window !== "undefined") {
+      isSupported().then((supported) => {
+        if (supported && app) {
+          analytics = getAnalytics(app);
+        }
+      }).catch(() => {
+        // Analytics not supported in this environment
+      });
+    }
   }
 } catch (err) {
   console.warn("[Firebase] Initialization skipped or error:", err);
 }
 
-export { app, db };
+export { app, db, analytics };
 
 export const LISTINGS_COLLECTION = "listings";
 
