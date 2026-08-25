@@ -11,6 +11,7 @@ import {
   type Firestore,
   type Unsubscribe,
 } from "firebase/firestore";
+import { getAuth, signInAnonymously, onAuthStateChanged, type Auth, type User } from "firebase/auth";
 import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
 import type { Listing } from "./lib/types";
 
@@ -37,12 +38,14 @@ export function isFirebaseConfigured(): boolean {
 // Initialize Firebase App (singleton across HMR / SSR)
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
+let auth: Auth | null = null;
 let analytics: Analytics | null = null;
 
 try {
   if (isFirebaseConfigured()) {
     app = getApps().length > 0 ? getApps()[0]! : initializeApp(firebaseConfig);
     db = getFirestore(app);
+    auth = getAuth(app);
 
     // Initialize Analytics if supported in the current browser environment
     if (typeof window !== "undefined") {
@@ -59,7 +62,46 @@ try {
   console.warn("[Firebase] Initialization skipped or error:", err);
 }
 
-export { app, db, analytics };
+export { app, db, auth, analytics };
+
+let authPromise: Promise<User | null> | null = null;
+
+/**
+ * Ensures an active authenticated session exists (via Anonymous Auth)
+ * before performing Firestore operations.
+ */
+export async function ensureAuth(): Promise<User | null> {
+  if (!auth || !isFirebaseConfigured()) return null;
+  if (auth.currentUser) return auth.currentUser;
+  if (!authPromise) {
+    authPromise = new Promise((resolve) => {
+      if (!auth) return resolve(null);
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) {
+          unsubscribe();
+          resolve(user);
+        } else {
+          signInAnonymously(auth!)
+            .then((cred) => {
+              unsubscribe();
+              resolve(cred.user);
+            })
+            .catch((err) => {
+              console.warn("[Firebase] Anonymous sign-in error:", err);
+              unsubscribe();
+              resolve(null);
+            });
+        }
+      });
+    });
+  }
+  return authPromise;
+}
+
+// Automatically ensure auth session in browser
+if (typeof window !== "undefined" && isFirebaseConfigured()) {
+  void ensureAuth();
+}
 
 export const LISTINGS_COLLECTION = "listings";
 
@@ -69,6 +111,7 @@ export const LISTINGS_COLLECTION = "listings";
 export async function saveListingToFirestore(listing: Listing): Promise<void> {
   if (!db || !isFirebaseConfigured()) return;
   try {
+    await ensureAuth();
     const docRef = doc(db, LISTINGS_COLLECTION, listing.id);
     // Remove undefined values to comply with Firestore document constraints
     const cleanData = Object.fromEntries(
@@ -86,6 +129,7 @@ export async function saveListingToFirestore(listing: Listing): Promise<void> {
 export async function deleteListingFromFirestore(listingId: string): Promise<void> {
   if (!db || !isFirebaseConfigured()) return;
   try {
+    await ensureAuth();
     const docRef = doc(db, LISTINGS_COLLECTION, listingId);
     await deleteDoc(docRef);
   } catch (err) {
@@ -99,6 +143,7 @@ export async function deleteListingFromFirestore(listingId: string): Promise<voi
 export async function fetchListingsFromFirestore(): Promise<Listing[]> {
   if (!db || !isFirebaseConfigured()) return [];
   try {
+    await ensureAuth();
     const colRef = collection(db, LISTINGS_COLLECTION);
     const snap = await getDocs(query(colRef));
     const listings: Listing[] = [];
@@ -123,6 +168,7 @@ export function subscribeToListings(
   }
   try {
     const colRef = collection(db, LISTINGS_COLLECTION);
+    void ensureAuth();
     return onSnapshot(
       colRef,
       (snapshot) => {
