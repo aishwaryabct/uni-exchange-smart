@@ -13,7 +13,12 @@ export function ListingCard({
   matchScore?: number | undefined;
   delay?: number | undefined;
 }) {
-  const owner = getStudent(listing.ownerId);
+  const owner = getStudent(listing.ownerId, null, listing);
+  const nameParts = owner.name.trim().split(/\s+/);
+  const displayName =
+    nameParts.length > 1
+      ? `${nameParts[0]} ${nameParts[nameParts.length - 1]![0]}.`
+      : nameParts[0] || "Student";
 
   return (
     <Link
@@ -63,7 +68,7 @@ export function ListingCard({
         <div className="mt-auto flex items-center justify-between border-t border-border pt-3.5 [margin-top:auto]">
           <div className="mt-3.5 flex items-center gap-2">
             <Avatar student={owner} className="size-6 text-[9px]" />
-            <span className="text-xs font-medium">{owner.name.split(" ")[0]} {owner.name.split(" ")[1]?.[0]}.</span>
+            <span className="text-xs font-medium">{displayName}</span>
           </div>
           <span className="mt-3.5 text-xs font-bold text-primary">{priceLabel(listing)}</span>
         </div>

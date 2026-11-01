@@ -1,13 +1,25 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { zodValidator, fallback } from "@tanstack/zod-adapter";
-import { ArrowLeft, Check, CheckCircle2, Inbox, Send, X } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  Inbox,
+  MessageSquare,
+  Send,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
 import { PageContainer } from "@/components/app-shell";
+import { AuthModal } from "@/components/auth-modal";
 import { Avatar, StarInput } from "@/components/ui-bits";
-import { currentUser, getStudent } from "@/lib/data";
+import { subscribeToThreadMessages } from "@/firebase";
+import { useAuth } from "@/lib/auth";
+import { getStudent } from "@/lib/data";
 import { actions, useAppState } from "@/lib/store";
-import type { Thread } from "@/lib/types";
+import { firestoreMessageToChatMessage, type Thread } from "@/lib/types";
 
 const messagesSearchSchema = z.object({
   thread: fallback(z.string(), "").default(""),
@@ -19,7 +31,10 @@ export const Route = createFileRoute("/_app/messages")({
   head: () => ({
     meta: [
       { title: "Messages & Requests — REXchange" },
-      { name: "description", content: "Chat with students, respond to exchange requests, and complete rated trades." },
+      {
+        name: "description",
+        content: "Chat with students, respond to exchange requests, and complete rated trades.",
+      },
       { property: "og:title", content: "Messages & Requests — REXchange" },
       { property: "og:description", content: "Chat and manage exchange requests." },
     ],
@@ -39,40 +54,138 @@ function MessagesPage() {
   const { thread: threadId, tab } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const { threads, listings } = useAppState();
+  const { user, profile } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const activeUserId = profile?.uid || user?.uid || "";
   const isRequests = tab === "requests";
-  const visibleThreads = threads.filter((t) => (isRequests ? t.kind === "request" : t.kind === "chat"));
+  const visibleThreads =
+    profile || user
+      ? threads.filter(
+          (t) =>
+            (t.participantIds?.includes(activeUserId) ||
+              t.creatorId === activeUserId ||
+              t.recipientId === activeUserId) &&
+            (isRequests ? t.kind === "request" : t.kind === "chat"),
+        )
+      : [];
   const selected = threads.find((t) => t.id === threadId) ?? visibleThreads[0];
-  const pendingCount = threads.filter((t) => t.kind === "request" && t.status === "pending").length;
+  const pendingCount =
+    profile || user
+      ? threads.filter(
+          (t) => t.kind === "request" && t.status === "pending" && t.recipientId === activeUserId,
+        ).length
+      : 0;
+
+  const counterpartId = selected
+    ? selected.creatorId === activeUserId
+      ? selected.recipientId
+      : selected.creatorId || selected.studentId
+    : undefined;
+  const selectedListing = selected?.listingId
+    ? listings.find((l) => l.id === selected.listingId)
+    : undefined;
+  const selectedStudent = counterpartId
+    ? getStudent(counterpartId, profile, selectedListing, listings)
+    : undefined;
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [selected?.id, selected?.messages.length]);
 
+  // Real-time Firestore messages subscription for the selected cloud thread
+  useEffect(() => {
+    if (!selected?.id) return;
+    const isCloud = selected.id.startsWith("t_chat_") || selected.id.startsWith("t_req_");
+    if (!isCloud) return;
+
+    const unsubscribe = subscribeToThreadMessages(
+      selected.id,
+      (firestoreMessages) => {
+        const chatMessages = firestoreMessages.map((m) => {
+          let formattedTime = "Recently";
+          if (m.createdAt && typeof m.createdAt.toDate === "function") {
+            const d = m.createdAt.toDate();
+            formattedTime = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          }
+          const isMsgMine = Boolean(activeUserId && m.senderId === activeUserId);
+          const msgSenderName = isMsgMine
+            ? profile?.name || user?.displayName || "You"
+            : getStudent(m.senderId, profile, selectedListing, listings).name ||
+              selectedStudent?.name ||
+              "Classmate";
+          return firestoreMessageToChatMessage(m, formattedTime, msgSenderName);
+        });
+        actions.setThreadMessages(selected.id, chatMessages);
+      },
+      (err) => {
+        console.error(`[Messages] Error subscribing to thread messages for ${selected.id}:`, err);
+      },
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [selected?.id, activeUserId, selectedListing, selectedStudent, profile, user, listings]);
+
+  if (!profile) {
+    return (
+      <PageContainer>
+        <section className="animate-rise mx-auto max-w-2xl overflow-hidden rounded-3xl border border-border bg-card p-8 text-center shadow-sm sm:p-12">
+          <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-primary/10 text-primary">
+            <MessageSquare className="size-8" />
+          </div>
+          <h1 className="mt-5 font-heading text-2xl font-bold tracking-tight sm:text-3xl">
+            Sign in to view your messages
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Sign in with your campus account to chat with classmates, respond to exchange requests,
+            and complete rated trades.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => setAuthOpen(true)}
+              className="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark"
+            >
+              Sign in / Register
+            </button>
+          </div>
+        </section>
+        <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
+      </PageContainer>
+    );
+  }
+
   function selectThread(id: string) {
+    setActionError(null);
     navigate({ to: ".", search: (prev) => ({ ...prev, thread: id }) });
   }
 
-  function onSend(e: FormEvent) {
+  async function onSend(e: FormEvent) {
     e.preventDefault();
-    if (!selected || !draft.trim()) return;
-    actions.sendMessage(selected.id, draft);
-    setDraft("");
+    if (!selected || !draft.trim() || isSending) return;
+    setActionError(null);
+    setIsSending(true);
+    const textToSend = draft;
+    try {
+      await actions.sendMessage(selected.id, textToSend);
+      setDraft("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to send message.";
+      setActionError(msg);
+      console.warn("[Messages] Send message blocked:", err);
+    } finally {
+      setIsSending(false);
+    }
   }
-
-  const selectedStudent = selected ? getStudent(selected.studentId) : undefined;
-  const selectedListing = selected?.listingId
-    ? listings.find((l) => l.id === selected.listingId)
-    : undefined;
-  const lastFromOther =
-    selected && selected.messages.length > 0
-      ? selected.messages[selected.messages.length - 1]?.fromId !== currentUser.id
-      : true;
 
   return (
     <PageContainer>
@@ -87,7 +200,9 @@ function MessagesPage() {
           type="button"
           onClick={() => navigate({ to: ".", search: (prev) => ({ ...prev, tab: "chats" }) })}
           className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-            !isRequests ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground"
+            !isRequests
+              ? "bg-primary text-primary-foreground"
+              : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground"
           }`}
         >
           Chats
@@ -96,7 +211,9 @@ function MessagesPage() {
           type="button"
           onClick={() => navigate({ to: ".", search: (prev) => ({ ...prev, tab: "requests" }) })}
           className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-            isRequests ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground"
+            isRequests
+              ? "bg-primary text-primary-foreground"
+              : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground"
           }`}
         >
           Exchange requests
@@ -110,9 +227,7 @@ function MessagesPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-[300px_1fr]">
         {/* Thread list */}
-        <div
-          className={`space-y-2 ${selected && threadId ? "hidden md:block" : ""}`}
-        >
+        <div className={`space-y-2 ${selected && threadId ? "hidden md:block" : ""}`}>
           {visibleThreads.length === 0 ? (
             <div className="rounded-2xl border-2 border-dashed border-border p-8 text-center">
               <Inbox className="mx-auto size-7 text-muted-foreground" />
@@ -134,7 +249,14 @@ function MessagesPage() {
             </div>
           ) : (
             visibleThreads.map((thread) => {
-              const student = getStudent(thread.studentId);
+              const otherId =
+                thread.creatorId === activeUserId
+                  ? thread.recipientId
+                  : thread.creatorId || thread.studentId;
+              const listingForThread = thread.listingId
+                ? listings.find((l) => l.id === thread.listingId)
+                : undefined;
+              const student = getStudent(otherId, profile, listingForThread, listings);
               const last = thread.messages[thread.messages.length - 1];
               const active = selected?.id === thread.id;
               return (
@@ -143,7 +265,9 @@ function MessagesPage() {
                   type="button"
                   onClick={() => selectThread(thread.id)}
                   className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
-                    active ? "border-primary bg-accent" : "border-border bg-card hover:border-primary/40"
+                    active
+                      ? "border-primary bg-accent"
+                      : "border-border bg-card hover:border-primary/40"
                   }`}
                 >
                   <Avatar student={student} className="size-10 text-xs" />
@@ -158,7 +282,7 @@ function MessagesPage() {
                     </div>
                     <p className="truncate text-xs font-medium text-primary">{thread.subject}</p>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {last ? last.text : "No messages yet"}
+                      {thread.lastMessageText || (last ? last.text : "No messages yet")}
                     </p>
                   </div>
                 </button>
@@ -171,6 +295,26 @@ function MessagesPage() {
         <div className={`${!selected || (!threadId && "hidden md:block")}`}>
           {selected && selectedStudent ? (
             <div className="flex h-[560px] flex-col overflow-hidden rounded-2xl border border-border bg-card">
+              {/* Error banner */}
+              {actionError && (
+                <div
+                  role="alert"
+                  className="flex items-center justify-between gap-2 border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <AlertCircle className="size-3.5 shrink-0" />
+                    <span>{actionError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActionError(null)}
+                    className="font-semibold underline hover:no-underline"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
               {/* Header */}
               <div className="flex items-center gap-3 border-b border-border p-4">
                 <button
@@ -206,7 +350,15 @@ function MessagesPage() {
               {/* Messages */}
               <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto bg-muted/40 p-4">
                 {selected.messages.map((msg) => {
-                  const mine = msg.fromId === currentUser.id;
+                  const msgSenderId = msg.senderId || msg.fromId;
+                  const mine = Boolean(activeUserId && msgSenderId === activeUserId);
+                  const senderStudent =
+                    !mine && msgSenderId
+                      ? getStudent(msgSenderId, profile, selectedListing, listings)
+                      : undefined;
+                  const displayName = mine
+                    ? "You"
+                    : msg.senderName || senderStudent?.name || selectedStudent?.name || "Classmate";
                   return (
                     <div key={msg.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                       <div
@@ -216,6 +368,11 @@ function MessagesPage() {
                             : "rounded-bl-sm border border-border bg-card"
                         }`}
                       >
+                        {!mine && (
+                          <p className="mb-1 text-[11px] font-semibold text-primary">
+                            {displayName}
+                          </p>
+                        )}
                         <p className="leading-relaxed">{msg.text}</p>
                         <p
                           className={`mt-1 text-right text-[9px] ${
@@ -231,25 +388,54 @@ function MessagesPage() {
               </div>
 
               {/* Request actions */}
-              {selected.kind === "request" && selected.status === "pending" && lastFromOther && (
-                <div className="flex items-center gap-2 border-t border-border bg-accent/50 px-4 py-3">
-                  <p className="flex-1 text-xs font-medium text-accent-foreground">
-                    {selectedStudent.name.split(" ")[0]} sent you an exchange request
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => actions.respondToRequest(selected.id, true)}
-                    className="inline-flex items-center gap-1 rounded-lg bg-mint px-3 py-1.5 text-xs font-bold text-mint-foreground transition-opacity hover:opacity-90"
-                  >
-                    <Check className="size-3.5" /> Accept
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => actions.respondToRequest(selected.id, false)}
-                    className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground transition-colors hover:text-destructive"
-                  >
-                    <X className="size-3.5" /> Decline
-                  </button>
+              {selected.kind === "request" && selected.status === "pending" && (
+                <div className="flex flex-col gap-2 border-t border-border bg-accent/50 px-4 py-3 sm:flex-row sm:items-center">
+                  {selected.recipientId === activeUserId ? (
+                    <>
+                      <p className="flex-1 text-xs font-medium text-accent-foreground">
+                        {selectedStudent.name.split(" ")[0]} sent you an exchange request
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setActionError(null);
+                            try {
+                              await actions.respondToRequest(selected.id, true);
+                            } catch (err: unknown) {
+                              const msg =
+                                err instanceof Error ? err.message : "Failed to accept request.";
+                              setActionError(msg);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg bg-mint px-3 py-1.5 text-xs font-bold text-mint-foreground transition-opacity hover:opacity-90"
+                        >
+                          <Check className="size-3.5" /> Accept
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setActionError(null);
+                            try {
+                              await actions.respondToRequest(selected.id, false);
+                            } catch (err: unknown) {
+                              const msg =
+                                err instanceof Error ? err.message : "Failed to decline request.";
+                              setActionError(msg);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground transition-colors hover:text-destructive"
+                        >
+                          <X className="size-3.5" /> Decline
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="flex-1 text-xs font-medium text-accent-foreground">
+                      Your request has been sent to {selectedStudent.name} and is pending their
+                      response.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -268,9 +454,16 @@ function MessagesPage() {
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        actions.completeExchange(selected.id, rating, reviewText);
-                        setReviewText("");
+                      onClick={async () => {
+                        setActionError(null);
+                        try {
+                          await actions.completeExchange(selected.id, rating, reviewText);
+                          setReviewText("");
+                        } catch (err: unknown) {
+                          const msg =
+                            err instanceof Error ? err.message : "Failed to complete exchange.";
+                          setActionError(msg);
+                        }
                       }}
                       className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary-dark"
                     >
@@ -281,7 +474,10 @@ function MessagesPage() {
               )}
 
               {/* Composer */}
-              <form onSubmit={onSend} className="flex items-center gap-2 border-t border-border p-3">
+              <form
+                onSubmit={onSend}
+                className="flex items-center gap-2 border-t border-border p-3"
+              >
                 <input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -290,7 +486,8 @@ function MessagesPage() {
                 />
                 <button
                   type="submit"
-                  className="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary-dark"
+                  disabled={isSending || !draft.trim()}
+                  className="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-50 disabled:pointer-events-none"
                   aria-label="Send message"
                 >
                   <Send className="size-4" />

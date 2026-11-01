@@ -62,13 +62,7 @@ export function Stars({ rating, className = "size-3.5" }: { rating: number; clas
   );
 }
 
-export function StarInput({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
+export function StarInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <div className="flex items-center gap-1">
       {[1, 2, 3, 4, 5].map((i) => (

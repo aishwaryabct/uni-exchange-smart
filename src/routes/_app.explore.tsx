@@ -5,6 +5,7 @@ import { useMemo, type FormEvent } from "react";
 import { z } from "zod";
 import { PageContainer } from "@/components/app-shell";
 import { ListingCard } from "@/components/listing-card";
+import { useAuth } from "@/lib/auth";
 import { getStudent } from "@/lib/data";
 import { matchForListing } from "@/lib/matching";
 import { useAppState } from "@/lib/store";
@@ -22,9 +23,16 @@ export const Route = createFileRoute("/_app/explore")({
   head: () => ({
     meta: [
       { title: "Explore Marketplace — REXchange" },
-      { name: "description", content: "Search and filter books, electronics, tickets, skills, giveaways, and requests from students on your campus." },
+      {
+        name: "description",
+        content:
+          "Search and filter books, electronics, tickets, skills, giveaways, and requests from students on your campus.",
+      },
       { property: "og:title", content: "Explore Marketplace — REXchange" },
-      { property: "og:description", content: "Search and filter campus listings across every category." },
+      {
+        property: "og:description",
+        content: "Search and filter campus listings across every category.",
+      },
     ],
   }),
   component: ExplorePage,
@@ -34,8 +42,9 @@ function ExplorePage() {
   const { q, cat, types, sort } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const { listings } = useAppState();
+  const { profile } = useAuth();
 
-  const activeTypes = types ? types.split(",").filter(Boolean) : [];
+  const activeTypes = useMemo(() => (types ? types.split(",").filter(Boolean) : []), [types]);
 
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -62,20 +71,25 @@ function ExplorePage() {
       case "relevant":
         result.sort(
           (a, b) =>
-            (matchForListing(b, listings)?.score ?? 0) - (matchForListing(a, listings)?.score ?? 0),
+            (matchForListing(b, listings, profile)?.score ?? 0) -
+            (matchForListing(a, listings, profile)?.score ?? 0),
         );
         break;
       case "rating":
-        result.sort((a, b) => getStudent(b.ownerId).rating - getStudent(a.ownerId).rating);
+        result.sort(
+          (a, b) => getStudent(b.ownerId, null, b).rating - getStudent(a.ownerId, null, a).rating,
+        );
         break;
       case "price":
-        result.sort((a, b) => (a.price ?? Number.MAX_SAFE_INTEGER) - (b.price ?? Number.MAX_SAFE_INTEGER));
+        result.sort(
+          (a, b) => (a.price ?? Number.MAX_SAFE_INTEGER) - (b.price ?? Number.MAX_SAFE_INTEGER),
+        );
         break;
       default:
         result.sort((a, b) => a.postedHours - b.postedHours);
     }
     return result;
-  }, [listings, q, cat, activeTypes, sort]);
+  }, [listings, q, cat, activeTypes, sort, profile]);
 
   function setSearch(patch: Partial<{ q: string; cat: string; types: string; sort: string }>) {
     navigate({
@@ -166,7 +180,7 @@ function ExplorePage() {
             </p>
             <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
               You're browsing the <b>North Campus</b> community. Every member is verified with a
-              student email. 84 students online now.
+              student email. Direct peer-to-peer campus exchanges.
             </p>
           </div>
         </aside>
@@ -223,7 +237,7 @@ function ExplorePage() {
                 <ListingCard
                   key={listing.id}
                   listing={listing}
-                  matchScore={matchForListing(listing, listings)?.score}
+                  matchScore={matchForListing(listing, listings, profile)?.score}
                   delay={Math.min(i, 8) * 50}
                 />
               ))}

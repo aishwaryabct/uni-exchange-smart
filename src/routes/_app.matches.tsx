@@ -2,7 +2,9 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Check, MessageSquare, Search, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PageContainer } from "@/components/app-shell";
+import { AuthModal } from "@/components/auth-modal";
 import { Avatar, TypeBadge } from "@/components/ui-bits";
+import { useAuth } from "@/lib/auth";
 import { currentUser, getStudent } from "@/lib/data";
 import { computeMatches } from "@/lib/matching";
 import { actions, useAppState } from "@/lib/store";
@@ -11,7 +13,11 @@ export const Route = createFileRoute("/_app/matches")({
   head: () => ({
     meta: [
       { title: "AI Match — REXchange" },
-      { name: "description", content: "AI-powered matching between your requests and campus listings, with match scores and explanations." },
+      {
+        name: "description",
+        content:
+          "AI-powered matching between your requests and campus listings, with match scores and explanations.",
+      },
       { property: "og:title", content: "AI Match — REXchange" },
       { property: "og:description", content: "AI-powered campus exchange matching." },
     ],
@@ -28,14 +34,28 @@ function scoreTone(score: number): string {
 function MatchesPage() {
   const navigate = useNavigate();
   const { listings } = useAppState();
+  const { profile } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
   const [boost, setBoost] = useState("");
 
-  const matches = useMemo(() => computeMatches(listings, boost), [listings, boost]);
-  const myRequests = listings.filter((l) => l.ownerId === currentUser.id && l.type === "request");
+  const activeUserId = profile?.uid || currentUser.id;
+  const matches = useMemo(
+    () => computeMatches(listings, boost, profile),
+    [listings, boost, profile],
+  );
+  const myRequests = listings.filter((l) => l.ownerId === activeUserId && l.type === "request");
 
-  function messageOwner(listingId: string, ownerId: string, title: string) {
-    const threadId = actions.startThread(ownerId, listingId, title, "");
-    navigate({ to: "/messages", search: { thread: threadId, tab: "chats" } });
+  async function messageOwner(listingId: string, ownerId: string, title: string) {
+    if (!profile) {
+      setAuthOpen(true);
+      return;
+    }
+    try {
+      const threadId = await actions.startThread(ownerId, listingId, title, "");
+      navigate({ to: "/messages", search: { thread: threadId, tab: "chats" } });
+    } catch (err: unknown) {
+      console.warn("[Matches] Could not start thread:", err);
+    }
   }
 
   return (
@@ -115,7 +135,7 @@ function MatchesPage() {
         ) : (
           <div className="mt-4 space-y-4">
             {matches.map(({ listing, score, reasons }, i) => {
-              const owner = getStudent(listing.ownerId);
+              const owner = getStudent(listing.ownerId, profile, listing);
               return (
                 <article
                   key={listing.id}
@@ -173,7 +193,9 @@ function MatchesPage() {
 
                   <div className="flex shrink-0 items-center gap-4 sm:flex-col sm:items-end sm:gap-3">
                     <div className="rounded-xl border border-border bg-muted/50 px-4 py-2.5 text-center">
-                      <p className={`font-heading text-2xl font-bold ${scoreTone(score)}`}>{score}%</p>
+                      <p className={`font-heading text-2xl font-bold ${scoreTone(score)}`}>
+                        {score}%
+                      </p>
                       <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
                         Match score
                       </p>
@@ -201,6 +223,7 @@ function MatchesPage() {
           </div>
         )}
       </section>
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
     </PageContainer>
   );
 }

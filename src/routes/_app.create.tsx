@@ -1,8 +1,20 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Gift, Image as ImageIcon, Megaphone, Plus, Repeat2, Tag, Wrench } from "lucide-react";
+import {
+  Gift,
+  Image as ImageIcon,
+  Loader2,
+  LogIn,
+  Megaphone,
+  Plus,
+  Repeat2,
+  Tag,
+  Wrench,
+} from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { PageContainer } from "@/components/app-shell";
+import { AuthModal } from "@/components/auth-modal";
 import { ListingCard } from "@/components/listing-card";
+import { useAuth } from "@/lib/auth";
 import { imagePool } from "@/lib/data";
 import { actions } from "@/lib/store";
 import { CATEGORIES, type Category, type Listing, type ListingType } from "@/lib/types";
@@ -11,7 +23,11 @@ export const Route = createFileRoute("/_app/create")({
   head: () => ({
     meta: [
       { title: "Create a Listing — REXchange" },
-      { name: "description", content: "Sell, exchange, give away, offer a service, or request something from your campus community." },
+      {
+        name: "description",
+        content:
+          "Sell, exchange, give away, offer a service, or request something from your campus community.",
+      },
       { property: "og:title", content: "Create a Listing — REXchange" },
       { property: "og:description", content: "Post something for your campus community." },
     ],
@@ -23,7 +39,12 @@ const typeOptions: { value: ListingType; label: string; hint: string; icon: type
   { value: "sell", label: "Sell", hint: "Set a price and sell it", icon: Tag },
   { value: "exchange", label: "Exchange", hint: "Swap for something you need", icon: Repeat2 },
   { value: "giveaway", label: "Give Away", hint: "Free to a good home", icon: Gift },
-  { value: "service", label: "Offer a Service", hint: "Tutoring, repairs, design help", icon: Wrench },
+  {
+    value: "service",
+    label: "Offer a Service",
+    hint: "Tutoring, repairs, design help",
+    icon: Wrench,
+  },
   { value: "request", label: "Request Something", hint: "Ask the campus for it", icon: Megaphone },
 ];
 
@@ -35,6 +56,9 @@ const labelCls = "mb-1.5 block text-xs font-bold uppercase tracking-wider text-m
 
 function CreateListingPage() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
+
   const [type, setType] = useState<ListingType>("exchange");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -45,52 +69,96 @@ function CreateListingPage() {
   const [availability, setAvailability] = useState("");
   const [imageIdx, setImageIdx] = useState(0);
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const preview: Listing = {
     id: "preview",
-    ownerId: "u0",
+    ownerId: profile?.uid || "preview",
     title: title || "Your listing title",
-    description: description || "A short description will appear here — what is it, what shape is it in, and what do you want for it?",
+    description:
+      description ||
+      "A short description will appear here — what is it, what shape is it in, and what do you want for it?",
     category,
     condition,
     type,
     price: type === "sell" && price ? Number(price) : undefined,
     exchangePref: type !== "sell" && type !== "giveaway" ? exchangePref || undefined : undefined,
-    department: "Computer Science",
-    year: "Year 3",
+    department: profile?.department || "Computer Science",
+    year: profile?.year || "Year 1",
     availability: availability || "Flexible",
     image: imagePool[imageIdx]?.src,
     postedHours: 0,
     keywords: [],
+    ownerName: profile?.name,
+    ownerInitials: profile?.initials,
   };
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!title.trim() || !description.trim()) {
-      setError("Give your listing a title and a short description — classmates scroll past empty posts.");
+    setError("");
+    if (!profile) {
+      setAuthOpen(true);
+      setError("Please sign in or create an account to post your listing.");
+      return;
+    }
+    const trimmedTitle = title.trim();
+    const trimmedDesc = description.trim();
+
+    if (!trimmedTitle || !trimmedDesc) {
+      setError("Give your listing a title and a description — classmates scroll past empty posts.");
+      return;
+    }
+    if (trimmedTitle.length < 3) {
+      setError("Title must be at least 3 characters long.");
+      return;
+    }
+    if (trimmedDesc.length < 3) {
+      setError("Description must be at least 3 characters long.");
       return;
     }
     if (type === "sell" && !price.trim()) {
       setError("Set a price, or switch the listing type to Exchange / Give Away.");
       return;
     }
-    const id = actions.addListing({
-      title: title.trim(),
-      description: description.trim(),
-      category,
-      condition,
-      type,
-      price: type === "sell" ? Number(price) || 0 : undefined,
-      exchangePref: type !== "sell" && type !== "giveaway" ? exchangePref.trim() || undefined : undefined,
-      availability: availability.trim() || "Flexible",
-      image: imagePool[imageIdx]?.src,
-      keywords: title
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .split(/\s+/)
-        .filter((w) => w.length > 2),
-    });
-    navigate({ to: "/listing/$id", params: { id } });
+
+    setIsSubmitting(true);
+    try {
+      const id = await actions.addListing(
+        {
+          title: trimmedTitle,
+          description: trimmedDesc,
+          category,
+          condition,
+          type,
+          price: type === "sell" ? Number(price) || 0 : undefined,
+          exchangePref:
+            type !== "sell" && type !== "giveaway" ? exchangePref.trim() || undefined : undefined,
+          availability: availability.trim() || "Flexible",
+          image: imagePool[imageIdx]?.src,
+          keywords: title
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, " ")
+            .split(/\s+/)
+            .filter((w) => w.length > 2),
+        },
+        {
+          id: profile.uid,
+          department: profile.department,
+          year: profile.year,
+          name: profile.name,
+          initials: profile.initials,
+        },
+      );
+      navigate({ to: "/listing/$id", params: { id } });
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Failed to publish listing to the database. Please try again.";
+      setError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   const showPrice = type === "sell";
@@ -108,6 +176,24 @@ function CreateListingPage() {
           live.
         </p>
       </div>
+
+      {!profile && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-primary/20 bg-primary/5 p-4">
+          <div>
+            <p className="text-sm font-bold text-foreground">Sign in required to publish</p>
+            <p className="text-xs text-muted-foreground">
+              Classmates need to know which verified student is offering this item.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAuthOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground shadow-sm hover:bg-primary-dark"
+          >
+            <LogIn className="size-3.5" /> Sign In / Join Campus
+          </button>
+        </div>
+      )}
 
       <form onSubmit={onSubmit} className="mt-8 grid gap-8 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
@@ -129,9 +215,13 @@ function CreateListingPage() {
                         : "border-border bg-card hover:border-primary/40"
                     }`}
                   >
-                    <Icon className={`size-5 ${active ? "text-primary" : "text-muted-foreground"}`} />
+                    <Icon
+                      className={`size-5 ${active ? "text-primary" : "text-muted-foreground"}`}
+                    />
                     <span className="text-sm font-bold">{opt.label}</span>
-                    <span className="text-[10px] leading-tight text-muted-foreground">{opt.hint}</span>
+                    <span className="text-[10px] leading-tight text-muted-foreground">
+                      {opt.hint}
+                    </span>
                   </button>
                 );
               })}
@@ -147,7 +237,9 @@ function CreateListingPage() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder={
-                type === "request" ? "Need: graphing calculator for STAT 201" : "Sony WH-1000XM4 headphones"
+                type === "request"
+                  ? "Need: graphing calculator for STAT 201"
+                  : "Sony WH-1000XM4 headphones"
               }
               className={inputCls}
               maxLength={80}
@@ -223,7 +315,9 @@ function CreateListingPage() {
           {showExchangePref && (
             <div>
               <label htmlFor="exchangePref" className={labelCls}>
-                {type === "request" ? "What can you offer in return?" : "What would you take in exchange?"}
+                {type === "request"
+                  ? "What can you offer in return?"
+                  : "What would you take in exchange?"}
               </label>
               <input
                 id="exchangePref"
@@ -285,9 +379,18 @@ function CreateListingPage() {
 
           <button
             type="submit"
-            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark"
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-6 py-3 text-sm font-bold text-primary-foreground shadow-sm transition-colors hover:bg-primary-dark disabled:opacity-50"
           >
-            <Plus className="size-4" /> Publish listing
+            {isSubmitting ? (
+              <>
+                <Loader2 className="size-4 animate-spin" /> Publishing listing…
+              </>
+            ) : (
+              <>
+                <Plus className="size-4" /> Publish listing
+              </>
+            )}
           </button>
         </div>
 
@@ -301,6 +404,7 @@ function CreateListingPage() {
           </div>
         </div>
       </form>
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
     </PageContainer>
   );
 }

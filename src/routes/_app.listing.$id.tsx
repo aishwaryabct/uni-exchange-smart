@@ -1,9 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
+  AlertCircle,
   ArrowLeft,
   Check,
   Clock,
+  Edit3,
   ImageOff,
+  Loader2,
   MessageSquare,
   Repeat2,
   Send,
@@ -12,9 +15,12 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PageContainer } from "@/components/app-shell";
+import { AuthModal } from "@/components/auth-modal";
+import { EditListingModal } from "@/components/edit-listing-modal";
 import { ListingCard } from "@/components/listing-card";
 import { Avatar, MatchPill, priceLabel, Stars, TypeBadge } from "@/components/ui-bits";
-import { currentUser, getStudent, timeAgo } from "@/lib/data";
+import { useAuth } from "@/lib/auth";
+import { getStudent, timeAgo } from "@/lib/data";
 import { matchForListing } from "@/lib/matching";
 import { actions, useAppState } from "@/lib/store";
 
@@ -22,7 +28,10 @@ export const Route = createFileRoute("/_app/listing/$id")({
   head: () => ({
     meta: [
       { title: "Listing — REXchange" },
-      { name: "description", content: "Listing details, owner reputation, and AI match insight on REXchange." },
+      {
+        name: "description",
+        content: "Listing details, owner reputation, and AI match insight on REXchange.",
+      },
       { property: "og:title", content: "Listing — REXchange" },
       { property: "og:description", content: "Listing details and AI match insight." },
     ],
@@ -34,13 +43,19 @@ function ListingDetailPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const { listings } = useAppState();
+  const { profile } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestText, setRequestText] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   const listing = listings.find((l) => l.id === id);
   const match = useMemo(
-    () => (listing ? matchForListing(listing, listings) : undefined),
-    [listing, listings],
+    () => (listing ? matchForListing(listing, listings, profile) : undefined),
+    [listing, listings, profile],
   );
   const similar = useMemo(
     () =>
@@ -70,22 +85,66 @@ function ListingDetailPage() {
     );
   }
 
-  const owner = getStudent(listing.ownerId);
-  const isMine = listing.ownerId === currentUser.id;
+  const owner = getStudent(listing.ownerId, profile, listing);
+  const isMine = Boolean(profile && listing.ownerId === profile.uid);
 
-  function messageOwner() {
+  const handleDelete = async () => {
+    if (!listing || !profile || deletingId) return;
+    setDeleteError(null);
+    setDeletingId(listing.id);
+    try {
+      const res = await actions.removeListing(listing.id, profile.uid);
+      if (res.success) {
+        navigate({ to: "/dashboard" });
+      } else {
+        setDeleteError(res.error || "Failed to remove listing.");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to remove listing.";
+      setDeleteError(msg);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  async function messageOwner() {
     if (!listing) return;
-    const threadId = actions.startThread(owner.id, listing.id, listing.title, "");
-    navigate({ to: "/messages", search: { thread: threadId, tab: "chats" } });
+    if (!profile) {
+      setAuthOpen(true);
+      return;
+    }
+    setRequestError(null);
+    try {
+      const threadId = await actions.startThread(owner.id, listing.id, listing.title, "");
+      navigate({ to: "/messages", search: { thread: threadId, tab: "chats" } });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to start conversation.";
+      setRequestError(msg);
+    }
   }
 
-  function sendRequest() {
+  async function sendRequest() {
     if (!listing) return;
+    if (!profile) {
+      setAuthOpen(true);
+      return;
+    }
+    setRequestError(null);
     const text =
       requestText.trim() ||
       `Hi ${owner.name.split(" ")[0]}! I'm interested in “${listing.title}”. Is it still available?`;
-    const threadId = actions.sendExchangeRequest(owner.id, listing.id, `Request: ${listing.title}`, text);
-    navigate({ to: "/messages", search: { thread: threadId, tab: "requests" } });
+    try {
+      const threadId = await actions.sendExchangeRequest(
+        owner.id,
+        listing.id,
+        `Request: ${listing.title}`,
+        text,
+      );
+      navigate({ to: "/messages", search: { thread: threadId, tab: "requests" } });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to send exchange request.";
+      setRequestError(msg);
+    }
   }
 
   const meta: { label: string; value: string }[] = [
@@ -139,7 +198,9 @@ function ListingDetailPage() {
 
           <section className="mt-6 rounded-2xl border border-border bg-card p-5">
             <h2 className="font-heading text-lg font-bold">About this listing</h2>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{listing.description}</p>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              {listing.description}
+            </p>
           </section>
 
           {match && (
@@ -160,7 +221,10 @@ function ListingDetailPage() {
                 </div>
                 <ul className="mt-4 space-y-2">
                   {match.reasons.map((reason) => (
-                    <li key={reason} className="flex items-start gap-2 text-sm text-primary-foreground/90">
+                    <li
+                      key={reason}
+                      className="flex items-start gap-2 text-sm text-primary-foreground/90"
+                    >
                       <Check className="mt-0.5 size-4 shrink-0" />
                       {reason}
                     </li>
@@ -226,17 +290,66 @@ function ListingDetailPage() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => {
-                    actions.removeListing(listing.id);
-                    navigate({ to: "/dashboard" });
-                  }}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10"
+                  onClick={() => setEditOpen(true)}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-card py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-accent"
                 >
-                  <Trash2 className="size-4" /> Remove listing
+                  <Edit3 className="size-4" /> Edit listing
+                </button>
+                {deleteError && (
+                  <div
+                    role="alert"
+                    className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <AlertCircle className="size-3.5 shrink-0" />
+                      <span>{deleteError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteError(null)}
+                      className="font-semibold underline hover:no-underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  disabled={Boolean(deletingId)}
+                  onClick={handleDelete}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2.5 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                >
+                  {deletingId ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" /> Removing listing…
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="size-4" /> Remove listing
+                    </>
+                  )}
                 </button>
               </div>
             ) : (
               <div className="mt-4 space-y-2">
+                {requestError && (
+                  <div
+                    role="alert"
+                    className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <AlertCircle className="size-3.5 shrink-0" />
+                      <span>{requestError}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRequestError(null)}
+                      className="font-semibold underline hover:no-underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={messageOwner}
@@ -288,11 +401,20 @@ function ListingDetailPage() {
           </h2>
           <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {similar.map((l, i) => (
-              <ListingCard key={l.id} listing={l} matchScore={matchForListing(l, listings)?.score} delay={i * 60} />
+              <ListingCard
+                key={l.id}
+                listing={l}
+                matchScore={matchForListing(l, listings, profile)?.score}
+                delay={i * 60}
+              />
             ))}
           </div>
         </section>
       )}
+      {isMine && listing && (
+        <EditListingModal open={editOpen} onOpenChange={setEditOpen} listing={listing} />
+      )}
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} />
     </PageContainer>
   );
 }

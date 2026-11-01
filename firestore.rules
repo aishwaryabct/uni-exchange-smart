@@ -1,0 +1,324 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // Helper Functions for Listing Validation
+    // ==========================================
+    function isValidKeywordList(keywords) {
+      return keywords is list
+        && keywords.size() <= 30
+        && (keywords.size() < 1  || (keywords[0]  is string && keywords[0].size()  <= 100))
+        && (keywords.size() < 2  || (keywords[1]  is string && keywords[1].size()  <= 100))
+        && (keywords.size() < 3  || (keywords[2]  is string && keywords[2].size()  <= 100))
+        && (keywords.size() < 4  || (keywords[3]  is string && keywords[3].size()  <= 100))
+        && (keywords.size() < 5  || (keywords[4]  is string && keywords[4].size()  <= 100))
+        && (keywords.size() < 6  || (keywords[5]  is string && keywords[5].size()  <= 100))
+        && (keywords.size() < 7  || (keywords[6]  is string && keywords[6].size()  <= 100))
+        && (keywords.size() < 8  || (keywords[7]  is string && keywords[7].size()  <= 100))
+        && (keywords.size() < 9  || (keywords[8]  is string && keywords[8].size()  <= 100))
+        && (keywords.size() < 10 || (keywords[9]  is string && keywords[9].size()  <= 100))
+        && (keywords.size() < 11 || (keywords[10] is string && keywords[10].size() <= 100))
+        && (keywords.size() < 12 || (keywords[11] is string && keywords[11].size() <= 100))
+        && (keywords.size() < 13 || (keywords[12] is string && keywords[12].size() <= 100))
+        && (keywords.size() < 14 || (keywords[13] is string && keywords[13].size() <= 100))
+        && (keywords.size() < 15 || (keywords[14] is string && keywords[14].size() <= 100))
+        && (keywords.size() < 16 || (keywords[15] is string && keywords[15].size() <= 100))
+        && (keywords.size() < 17 || (keywords[16] is string && keywords[16].size() <= 100))
+        && (keywords.size() < 18 || (keywords[17] is string && keywords[17].size() <= 100))
+        && (keywords.size() < 19 || (keywords[18] is string && keywords[18].size() <= 100))
+        && (keywords.size() < 20 || (keywords[19] is string && keywords[19].size() <= 100))
+        && (keywords.size() < 21 || (keywords[20] is string && keywords[20].size() <= 100))
+        && (keywords.size() < 22 || (keywords[21] is string && keywords[21].size() <= 100))
+        && (keywords.size() < 23 || (keywords[22] is string && keywords[22].size() <= 100))
+        && (keywords.size() < 24 || (keywords[23] is string && keywords[23].size() <= 100))
+        && (keywords.size() < 25 || (keywords[24] is string && keywords[24].size() <= 100))
+        && (keywords.size() < 26 || (keywords[25] is string && keywords[25].size() <= 100))
+        && (keywords.size() < 27 || (keywords[26] is string && keywords[26].size() <= 100))
+        && (keywords.size() < 28 || (keywords[27] is string && keywords[27].size() <= 100))
+        && (keywords.size() < 29 || (keywords[28] is string && keywords[28].size() <= 100))
+        && (keywords.size() < 30 || (keywords[29] is string && keywords[29].size() <= 100));
+    }
+
+    function isValidListing(data, listingId) {
+      return data.keys().hasAll([
+               'id', 'ownerId', 'title', 'description', 'category',
+               'condition', 'type', 'department', 'year',
+               'availability', 'postedHours', 'keywords'
+             ])
+          && data.keys().hasOnly([
+               'id', 'ownerId', 'title', 'description', 'category',
+               'condition', 'type', 'department', 'year',
+               'availability', 'postedHours', 'keywords',
+               'price', 'exchangePref', 'image',
+               'ownerName', 'ownerInitials'
+             ])
+          && data.id is string && data.id == listingId
+          && data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128
+          && data.title is string && data.title.size() >= 3 && data.title.size() <= 100
+          && data.description is string && data.description.size() >= 3 && data.description.size() <= 3000
+          && data.category in [
+               'Books', 'Electronics', 'Event Tickets',
+               'Study Materials', 'Skills & Services', 'Gear & Lifestyle'
+             ]
+          && data.type in ['sell', 'exchange', 'giveaway', 'service', 'request']
+          && data.condition is string && data.condition.size() >= 1 && data.condition.size() <= 50
+          && data.department is string && data.department.size() >= 1 && data.department.size() <= 100
+          && data.year is string && data.year.size() >= 1 && data.year.size() <= 50
+          && data.availability is string && data.availability.size() >= 1 && data.availability.size() <= 200
+          && data.postedHours is number && data.postedHours >= 0
+          && isValidKeywordList(data.keywords)
+          && (
+               (data.type == 'sell' && ('price' in data) && data.price is number && data.price >= 0)
+               || (data.type != 'sell' && !('price' in data))
+             )
+          && (!('exchangePref' in data) || (data.exchangePref is string && data.exchangePref.size() <= 500))
+          && (!('image' in data) || (data.image is string && data.image.size() <= 5000))
+          && (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 100))
+          && (!('ownerInitials' in data) || (data.ownerInitials is string && data.ownerInitials.size() >= 1 && data.ownerInitials.size() <= 10));
+    }
+
+    // ==========================================
+    // Helper Functions for Profile Validation
+    // ==========================================
+    function isImmutableProfileField(field) {
+      return ! (field in resource.data)
+          || ( (field in request.resource.data) && request.resource.data[field] == resource.data[field] );
+    }
+
+    function isValidProfile(data, userId) {
+      return data.keys().hasAll(['id', 'uid', 'name', 'email', 'department', 'year'])
+          && data.keys().hasOnly([
+               'id', 'uid', 'name', 'email', 'initials', 'color',
+               'department', 'year', 'rating', 'exchanges', 'joined', 'bio'
+             ])
+          && data.id is string && data.id == userId
+          && data.uid is string && data.uid == request.auth.uid && data.uid == userId
+          && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+          && data.email is string && data.email.size() <= 150
+          && data.department is string && data.department.size() >= 1 && data.department.size() <= 100
+          && data.year is string && data.year.size() >= 1 && data.year.size() <= 50
+          && (!('bio' in data) || (data.bio is string && data.bio.size() <= 1000))
+          && (!('initials' in data) || (data.initials is string && data.initials.size() >= 1 && data.initials.size() <= 10))
+          && (!('color' in data) || (data.color is string && data.color.size() >= 1 && data.color.size() <= 30))
+          && (!('joined' in data) || (data.joined is string && data.joined.size() >= 1 && data.joined.size() <= 50))
+          && (!('rating' in data) || (data.rating is number && data.rating >= 0 && data.rating <= 5))
+          && (!('exchanges' in data) || (data.exchanges is number && data.exchanges >= 0));
+    }
+
+    // ==========================================
+    // Student Profiles (/users/{userId})
+    // ==========================================
+    match /users/{userId} {
+      // 1. Only the authenticated student can read their own profile document (protects campus emails & student privacy)
+      allow read: if request.auth != null 
+                  && request.auth.uid == userId;
+
+      // 2. Only authenticated students can create their own profile document with valid schema
+      allow create: if request.auth != null 
+                    && request.auth.uid == userId
+                    && isValidProfile(request.resource.data, userId);
+
+      // 3. Only the authenticated owner can update their profile; immutable fields (uid, id, email, joined, rating, exchanges) cannot be modified
+      allow update: if request.auth != null 
+                    && request.auth.uid == userId
+                    && isValidProfile(request.resource.data, userId)
+                    && isImmutableProfileField('uid')
+                    && isImmutableProfileField('id')
+                    && isImmutableProfileField('email')
+                    && isImmutableProfileField('joined')
+                    && isImmutableProfileField('rating')
+                    && isImmutableProfileField('exchanges');
+
+      // 4. Profiles cannot be deleted directly via client SDK
+      allow delete: if false;
+    }
+
+    // ==========================================
+    // Marketplace Listings (/listings/{listingId})
+    // ==========================================
+    match /listings/{listingId} {
+      // 1. Marketplace listings remain publicly readable across campus
+      allow read: if true;
+
+      // 2. Only authenticated students can create listings, ownerId MUST match their UID, and listing schema must be valid
+      allow create: if request.auth != null 
+                    && request.resource.data.ownerId == request.auth.uid
+                    && isValidListing(request.resource.data, listingId);
+
+      // 3. Only the original creator can update their listing; ownerId, id, department, year, and postedHours cannot be modified
+      allow update: if request.auth != null 
+                    && resource.data.ownerId == request.auth.uid 
+                    && request.resource.data.ownerId == request.auth.uid
+                    && isValidListing(request.resource.data, listingId)
+                    && request.resource.data.ownerId == resource.data.ownerId
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.department == resource.data.department
+                    && request.resource.data.year == resource.data.year
+                    && request.resource.data.postedHours == resource.data.postedHours;
+
+      // 4. Only the original creator can delete their listing
+      allow delete: if request.auth != null 
+                    && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ==========================================
+    // Helper Functions for Messaging Validation
+    // ==========================================
+    function isValidThreadSchema(data, threadId) {
+      return data.keys().hasAll([
+               'id', 'creatorId', 'recipientId', 'participantIds',
+               'listingId', 'kind', 'status', 'subject', 'createdAt', 'updatedAt'
+             ])
+          && data.keys().hasOnly([
+               'id', 'creatorId', 'recipientId', 'participantIds',
+               'listingId', 'kind', 'status', 'subject', 'createdAt', 'updatedAt',
+               'lastMessageId', 'lastMessageText', 'lastMessageTime', 'lastMessageSenderId'
+             ])
+          && data.id is string && data.id == threadId
+          && data.creatorId is string && data.creatorId.size() > 0 && data.creatorId.size() <= 128
+          && data.recipientId is string && data.recipientId.size() > 0 && data.recipientId.size() <= 128
+          && data.participantIds is list
+          && data.participantIds.size() == 2
+          && data.creatorId in data.participantIds
+          && data.recipientId in data.participantIds
+          && data.creatorId != data.recipientId
+          && data.listingId is string && data.listingId.size() > 0 && data.listingId.size() <= 128
+          && data.kind in ['chat', 'request']
+          && data.status in ['active', 'pending', 'accepted', 'declined', 'completed']
+          && data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 200
+          && data.createdAt is timestamp
+          && data.updatedAt is timestamp
+          && (
+               (data.kind == 'chat' && threadId.matches('^t_chat_.*'))
+               || (data.kind == 'request' && threadId.matches('^t_req_.*'))
+             )
+          && (!('lastMessageId' in data) || (data.lastMessageId is string && data.lastMessageId.size() > 0 && data.lastMessageId.size() <= 128))
+          && (!('lastMessageText' in data) || (data.lastMessageText is string && data.lastMessageText.size() <= 2000))
+          && (!('lastMessageTime' in data) || (data.lastMessageTime is timestamp))
+          && (!('lastMessageSenderId' in data) || (data.lastMessageSenderId is string && data.lastMessageSenderId in data.participantIds));
+    }
+
+    function isValidInitialKindAndStatus(data) {
+      return (data.kind == 'chat' && data.status == 'active')
+          || (data.kind == 'request' && data.status == 'pending');
+    }
+
+    function isValidListingRecipient(data) {
+      return exists(/databases/$(database)/documents/listings/$(data.listingId))
+          && get(/databases/$(database)/documents/listings/$(data.listingId)).data.ownerId == data.recipientId
+          && data.recipientId != request.auth.uid;
+    }
+
+    function isValidBatchMessageUpdate(threadId) {
+      let msgPath = /databases/$(database)/documents/threads/$(threadId)/messages/$(request.resource.data.lastMessageId);
+      return !exists(msgPath)
+          && existsAfter(msgPath)
+          && getAfter(msgPath).data.senderId == request.auth.uid
+          && getAfter(msgPath).data.text == request.resource.data.lastMessageText
+          && getAfter(msgPath).data.createdAt == request.resource.data.lastMessageTime;
+    }
+
+    function isValidThreadUpdate(threadId) {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      return (
+               // Operation A: Message Summary Update in atomic batch
+               affected.hasOnly(['lastMessageId', 'lastMessageText', 'lastMessageTime', 'lastMessageSenderId', 'updatedAt'])
+               && resource.data.status in ['active', 'pending', 'accepted']
+               && ('lastMessageId' in request.resource.data)
+               && ('lastMessageText' in request.resource.data)
+               && ('lastMessageTime' in request.resource.data)
+               && ('lastMessageSenderId' in request.resource.data)
+               && request.resource.data.lastMessageSenderId == request.auth.uid
+               && request.resource.data.lastMessageTime == request.time
+               && request.resource.data.updatedAt == request.time
+               && isValidBatchMessageUpdate(threadId)
+             )
+          || (
+               // Operation B: Recipient Accept / Decline
+               affected.hasOnly(['status', 'updatedAt'])
+               && resource.data.kind == 'request'
+               && resource.data.status == 'pending'
+               && (request.resource.data.status == 'accepted' || request.resource.data.status == 'declined')
+               && request.auth.uid == resource.data.recipientId
+               && request.resource.data.updatedAt == request.time
+             )
+          || (
+               // Operation C: Participant Complete
+               affected.hasOnly(['status', 'updatedAt'])
+               && resource.data.kind == 'request'
+               && resource.data.status == 'accepted'
+               && request.resource.data.status == 'completed'
+               && (request.auth.uid in resource.data.participantIds)
+               && request.resource.data.updatedAt == request.time
+             );
+    }
+
+    function isValidMessageSchema(data, messageId) {
+      return data.keys().hasAll(['id', 'senderId', 'text', 'createdAt'])
+          && data.keys().hasOnly(['id', 'senderId', 'text', 'createdAt'])
+          && data.id is string && data.id == messageId
+          && data.senderId is string && data.senderId == request.auth.uid
+          && data.text is string && data.text.size() >= 1 && data.text.size() <= 2000
+          && data.createdAt == request.time;
+    }
+
+    // ==========================================
+    // Messaging Threads (/threads/{threadId})
+    // ==========================================
+    match /threads/{threadId} {
+      // 1a. Single-document reads (get): allow participants, or allow checking existence in transactions
+      allow get: if request.auth != null 
+                 && (resource == null || request.auth.uid in resource.data.participantIds);
+
+      // 1b. Collection queries (list): strictly restricted to participant queries
+      allow list: if request.auth != null 
+                  && request.auth.uid in resource.data.participantIds;
+
+      // 2. Thread creation requires authenticated creator, valid listing reference, matching recipient owner,
+      // server timestamps, correct initial status, valid deterministic schema, and no initial message preview
+      allow create: if request.auth != null 
+                    && request.resource.data.creatorId == request.auth.uid
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.updatedAt == request.time
+                    && !request.resource.data.keys().hasAny(['lastMessageId', 'lastMessageText', 'lastMessageTime', 'lastMessageSenderId'])
+                    && isValidInitialKindAndStatus(request.resource.data)
+                    && isValidListingRecipient(request.resource.data)
+                    && isValidThreadSchema(request.resource.data, threadId);
+
+      // 3. Thread updates restricted to atomic batch message summary or authorized status transitions
+      allow update: if request.auth != null 
+                    && request.auth.uid in resource.data.participantIds
+                    && isValidThreadSchema(request.resource.data, threadId)
+                    && isValidThreadUpdate(threadId);
+
+      // 4. Threads cannot be deleted directly via client SDK
+      allow delete: if false;
+
+      // ==========================================
+      // Messages Subcollection (/threads/{threadId}/messages/{messageId})
+      // ==========================================
+      match /messages/{messageId} {
+        // 1. Only participants of the parent thread can read messages
+        allow read: if request.auth != null 
+                    && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participantIds;
+
+        // 2. Only participants can create messages, parent thread must be in an open state,
+        // senderId must match auth.uid, and schema with server timestamp must be valid
+        allow create: if request.auth != null 
+                      && get(/databases/$(database)/documents/threads/$(threadId)).data.status in ['active', 'pending', 'accepted']
+                      && request.auth.uid in get(/databases/$(database)/documents/threads/$(threadId)).data.participantIds
+                      && request.resource.data.senderId == request.auth.uid
+                      && isValidMessageSchema(request.resource.data, messageId);
+
+        // 3. Messages are immutable once written
+        allow update: if false;
+
+        // 4. Messages cannot be deleted directly via client SDK
+        allow delete: if false;
+      }
+    }
+  }
+}
+

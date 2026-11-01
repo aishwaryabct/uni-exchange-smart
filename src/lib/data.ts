@@ -1,4 +1,4 @@
-import type { Listing, Review, Student, Thread } from "./types";
+import type { Listing, Review, Student, StudentProfile, Thread } from "./types";
 
 import imgCamera from "@/assets/listing-camera.jpg";
 import imgChemNotes from "@/assets/listing-chem-notes.jpg";
@@ -12,10 +12,12 @@ import imgGuitar from "@/assets/listing-guitar.jpg";
 import imgDrafting from "@/assets/listing-drafting.jpg";
 import imgStatsBook from "@/assets/listing-stats-book.jpg";
 
-export const currentUser: Student = {
+import { getCachedProfile, getDepartmentColor, getInitials } from "./auth";
+
+export const aishwaryaDemoUser: Student = {
   id: "u0",
-  name: "Aishwarya",
-  initials: "A",
+  name: "Aishwarya Rai",
+  initials: "AR",
   color: "#6366f1",
   department: "Computer Science",
   year: "Year 3",
@@ -25,8 +27,10 @@ export const currentUser: Student = {
   bio: "CS junior who trades more than she buys. Into photography, hackathons, and keeping good gear in circulation. North Campus, usually near the ACM lab.",
 };
 
+export const currentUser: Student = aishwaryaDemoUser;
+
 export const students: Student[] = [
-  currentUser,
+  aishwaryaDemoUser,
   {
     id: "u1",
     name: "Marcus Lee",
@@ -137,427 +141,60 @@ export const students: Student[] = [
   },
 ];
 
-export function getStudent(id: string): Student {
-  return students.find((s) => s.id === id) ?? currentUser;
+export function getStudent(
+  id: string,
+  activeProfile?: StudentProfile | null,
+  fallbackListing?: Partial<Listing> | null,
+  allListings?: Listing[] | null,
+): Student {
+  if (activeProfile && (activeProfile.id === id || activeProfile.uid === id)) {
+    return activeProfile;
+  }
+  const cached = getCachedProfile(id);
+  if (cached) return cached;
+  const found = students.find((s) => s.id === id);
+  if (found) return found;
+
+  // Only use fallbackListing's owner info if this student is actually the listing owner
+  const isListingOwner = Boolean(fallbackListing && fallbackListing.ownerId === id);
+  let ownerName = isListingOwner ? fallbackListing?.ownerName?.trim() : undefined;
+  let ownerInitials = isListingOwner ? fallbackListing?.ownerInitials?.trim() : undefined;
+  let department = isListingOwner ? fallbackListing?.department?.trim() : undefined;
+  let year = isListingOwner ? fallbackListing?.year?.trim() : undefined;
+
+  // If not the owner of this specific listing, check if they own any other listing in allListings
+  if (!ownerName && allListings && allListings.length > 0) {
+    const userListing = allListings.find((l) => l.ownerId === id && l.ownerName?.trim());
+    if (userListing) {
+      ownerName = userListing.ownerName?.trim();
+      ownerInitials = userListing.ownerInitials?.trim();
+      department = userListing.department?.trim();
+      year = userListing.year?.trim();
+    }
+  }
+
+  const dept = department || "Student Community";
+  const finalYear = year || "Undergrad";
+
+  return {
+    id,
+    name: ownerName || "Campus Student",
+    initials: ownerInitials || (ownerName ? getInitials(ownerName) : "CS"),
+    color: getDepartmentColor(dept),
+    department: dept,
+    year: finalYear,
+    rating: 5.0,
+    exchanges: 0,
+    joined: "Recently",
+    bio: "Student on REXchange marketplace.",
+  };
 }
 
-export const seedListings: Listing[] = [
-  {
-    id: "l1",
-    ownerId: "u1",
-    title: "Sony Alpha A6000 + kit lens",
-    description:
-      "My trusty mirrorless camera, used for two semesters of film class. Sensor is clean, shutter count low, comes with charger, strap and a 32GB card. Looking to swap for noise-cancelling headphones (Bose/Sony) or put it toward an iPad for digital sketching.",
-    category: "Electronics",
-    condition: "Good",
-    type: "exchange",
-    exchangePref: "Noise-cancelling headphones (Bose QC35 / Sony XM4) or iPad",
-    department: "Media Arts",
-    year: "Year 3",
-    availability: "Weekdays after 4pm · Media Arts building",
-    image: imgCamera,
-    postedHours: 3,
-    keywords: ["camera", "sony", "photography", "headphones", "ipad", "sketching", "film"],
-  },
-  {
-    id: "l2",
-    ownerId: "u2",
-    title: "Organic Chemistry notes + flashcards",
-    description:
-      "A whole year of neatly organized OChem notes, reaction maps, and 200+ hand-made flashcards. I graduated — free to a good home. Everything is labeled by week and exam topic.",
-    category: "Study Materials",
-    condition: "Like new",
-    type: "giveaway",
-    department: "Chemistry",
-    year: "Graduated",
-    availability: "Pickup at Science Library front desk",
-    image: imgChemNotes,
-    postedHours: 6,
-    keywords: ["chemistry", "ochem", "notes", "flashcards", "exam", "study"],
-  },
-  {
-    id: "l3",
-    ownerId: "u3",
-    title: "React debugging sessions (1hr)",
-    description:
-      "Stuck on a gnarly bug before the project deadline? I TA the web dev course and run 1-hour debugging sessions. Free for first-years, or swap for design help on my portfolio site.",
-    category: "Skills & Services",
-    condition: "—",
-    type: "service",
-    exchangePref: "Free for first-years, or swap for UI/design help",
-    department: "Computer Science",
-    year: "Year 4",
-    availability: "Tue & Thu evenings · ACM lab or Zoom",
-    image: imgCoding,
-    postedHours: 9,
-    keywords: ["react", "debugging", "coding", "tutoring", "web", "javascript", "cs"],
-  },
-  {
-    id: "l4",
-    ownerId: "u4",
-    title: "Spring Ball tickets (x2)",
-    description:
-      "Two Spring Ball tickets at early-bird price — I can't attend anymore due to a family trip. Instant QR transfer through the official event app. Selling together, not separately.",
-    category: "Event Tickets",
-    condition: "New",
-    type: "sell",
-    price: 1200,
-    department: "Business",
-    year: "Year 2",
-    availability: "Instant QR transfer, anytime",
-    image: imgTickets,
-    postedHours: 14,
-    keywords: ["tickets", "spring ball", "event", "concert", "party"],
-  },
-  {
-    id: "l5",
-    ownerId: "u5",
-    title: "Need: mountain bike for 2 weeks",
-    description:
-      "My bike is in the repair shop and I commute from off-campus. Looking to borrow or cheaply rent a mountain bike for about two weeks. Happy to leave my student ID as collateral and return it tuned up.",
-    category: "Gear & Lifestyle",
-    condition: "Any working condition",
-    type: "request",
-    exchangePref: "Borrow or cheap rental · will return it cleaned and tuned",
-    department: "Mechanical Eng",
-    year: "Year 2",
-    availability: "Needed for the next 2 weeks",
-    image: imgBike,
-    postedHours: 20,
-    keywords: ["bike", "bicycle", "mountain bike", "borrow", "commute"],
-  },
-  {
-    id: "l6",
-    ownerId: "u6",
-    title: "CASIO fx-991EX calculator",
-    description:
-      "The exam-approved scientific calculator. Barely used — I switched to a graphing model. Trade for a good desk lamp or a set of EEE lab notes.",
-    category: "Electronics",
-    condition: "Excellent",
-    type: "exchange",
-    exchangePref: "A good desk lamp or EEE lab notes",
-    department: "Electrical Eng",
-    year: "Year 4",
-    availability: "Flexible · EEE block, Room 204",
-    image: imgCalculator,
-    postedHours: 26,
-    keywords: ["calculator", "casio", "exam", "math", "statistics", "lamp"],
-  },
-  {
-    id: "l7",
-    ownerId: "u9",
-    title: "Thermodynamics Vol I (Cengel)",
-    description:
-      "Cengel & Boles, 9th edition. Highlighted in exactly the right places — I got an A. Some margin notes included at no extra charge.",
-    category: "Books",
-    condition: "Very good",
-    type: "sell",
-    price: 650,
-    department: "Mathematics",
-    year: "Year 5",
-    availability: "Weekends · Main Hall steps",
-    image: imgStatsBook,
-    postedHours: 30,
-    keywords: ["thermodynamics", "textbook", "engineering", "cengel"],
-  },
-  {
-    id: "l8",
-    ownerId: "u0",
-    title: "Philips eye-care desk lamp",
-    description:
-      "Warm/cool adjustable desk lamp, like new. I upgraded to a monitor light bar, so this is free to whoever picks it up first.",
-    category: "Gear & Lifestyle",
-    condition: "Like new",
-    type: "giveaway",
-    department: "Computer Science",
-    year: "Year 3",
-    availability: "Free pickup at Main Hall",
-    image: imgLamp,
-    postedHours: 8,
-    keywords: ["lamp", "desk", "light", "study", "dorm"],
-  },
-  {
-    id: "l9",
-    ownerId: "u8",
-    title: "Acoustic guitar + practice amp",
-    description:
-      "Dorm space crisis: selling my acoustic guitar with a small practice amp, capo, and a bag of picks. Great starter setup — I learned on this one.",
-    category: "Gear & Lifestyle",
-    condition: "Good",
-    type: "sell",
-    price: 4500,
-    department: "Music",
-    year: "Year 1",
-    availability: "Evenings · West dorm lobby",
-    image: imgGuitar,
-    postedHours: 40,
-    keywords: ["guitar", "music", "instrument", "amp", "acoustic"],
-  },
-  {
-    id: "l10",
-    ownerId: "u7",
-    title: "Architecture drafting kit",
-    description:
-      "Full drafting kit: metal compass, scale rulers, fineliners, and a cutting mat. Graduated to digital, so trade for graph paper pads, markers, or a decent desk organizer.",
-    category: "Study Materials",
-    condition: "Good",
-    type: "exchange",
-    exchangePref: "Graph paper pads, markers, or a desk organizer",
-    department: "Architecture",
-    year: "Year 3",
-    availability: "Studio building, afternoons",
-    image: imgDrafting,
-    postedHours: 52,
-    keywords: ["drafting", "architecture", "compass", "rulers", "drawing", "design"],
-  },
-  {
-    id: "l11",
-    ownerId: "u6",
-    title: "Intro to Statistics, 8th ed.",
-    description:
-      "The STAT 201 textbook with all chapters intact and practice problems untouched. Happy to trade for any CS textbook, a pair of headphones, or a desk lamp for my study corner.",
-    category: "Books",
-    condition: "Very good",
-    type: "exchange",
-    exchangePref: "CS textbook, headphones, or a desk lamp",
-    department: "Electrical Eng",
-    year: "Year 4",
-    availability: "Flexible · EEE block",
-    image: imgStatsBook,
-    postedHours: 5,
-    keywords: ["statistics", "textbook", "stat 201", "math", "probability", "book"],
-  },
-  {
-    id: "l12",
-    ownerId: "u9",
-    title: "Calculus tutoring — Thu 5pm",
-    description:
-      "Weekly calculus tutoring slot open on Thursdays at 5pm. I'm a math grad student with 40+ completed exchanges and a 5.0 rating. First session is a free coffee chat to see if we click.",
-    category: "Skills & Services",
-    condition: "—",
-    type: "service",
-    exchangePref: "First session free · then swap for meals or a small fee",
-    department: "Mathematics",
-    year: "Year 5",
-    availability: "Thursdays 5–6pm · Math lounge",
-    image: imgStatsBook,
-    postedHours: 12,
-    keywords: ["calculus", "tutoring", "math", "finals", "study", "mentoring"],
-  },
-  {
-    id: "l13",
-    ownerId: "u0",
-    title: "Bose QC35 noise-cancelling headphones",
-    description:
-      "Bose QC35 in good shape — ear pads replaced last semester. Looking to swap for a mechanical keyboard or put toward an iPad for my design elective.",
-    category: "Electronics",
-    condition: "Good",
-    type: "exchange",
-    exchangePref: "Mechanical keyboard or iPad",
-    department: "Computer Science",
-    year: "Year 3",
-    availability: "Anytime · North Campus",
-    image: imgHeadphones,
-    postedHours: 16,
-    keywords: ["bose", "headphones", "audio", "keyboard", "ipad", "noise cancelling"],
-  },
-  {
-    id: "r1",
-    ownerId: "u0",
-    title: "Need: iPad for digital sketching",
-    description:
-      "Taking a design elective next semester and need an iPad (any recent gen). Can trade my Bose QC35 headphones plus cash difference.",
-    category: "Electronics",
-    condition: "Any",
-    type: "request",
-    exchangePref: "Bose QC35 + cash difference",
-    department: "Computer Science",
-    year: "Year 3",
-    availability: "Flexible",
-    postedHours: 4,
-    keywords: ["ipad", "tablet", "sketching", "design", "apple"],
-  },
-  {
-    id: "r2",
-    ownerId: "u0",
-    title: "Need: Intro to Statistics textbook",
-    description:
-      "STAT 201 starts next week and the bookstore is sold out. Looking for the 8th edition — happy to trade or buy.",
-    category: "Books",
-    condition: "Any readable",
-    type: "request",
-    exchangePref: "Trade or buy",
-    department: "Computer Science",
-    year: "Year 3",
-    availability: "ASAP",
-    postedHours: 10,
-    keywords: ["statistics", "textbook", "stat 201", "book", "math"],
-  },
-  {
-    id: "r3",
-    ownerId: "u0",
-    title: "Need: calculus tutoring before finals",
-    description:
-      "Calc II is destroying me. Looking for a weekly tutoring session before finals — evenings work best.",
-    category: "Skills & Services",
-    condition: "—",
-    type: "request",
-    exchangePref: "Paid or skill swap (I can help with CS/programming)",
-    department: "Computer Science",
-    year: "Year 3",
-    availability: "Evenings, weekly",
-    postedHours: 22,
-    keywords: ["calculus", "tutoring", "math", "finals", "study"],
-  },
-];
+export const seedListings: Listing[] = [];
 
-export const seedThreads: Thread[] = [
-  {
-    id: "t1",
-    studentId: "u1",
-    listingId: "l1",
-    kind: "chat",
-    status: "active",
-    subject: "Sony Alpha A6000 + kit lens",
-    messages: [
-      {
-        id: "m1",
-        fromId: "u1",
-        text: "Hey Aishwarya! Saw your Bose QC35 listing — that's exactly what I'm after. Would you trade for the A6000? I can add cash on top.",
-        time: "10:24",
-      },
-      {
-        id: "m2",
-        fromId: "u0",
-        text: "Hi Marcus! Tempting. Could you do the camera + ₹4,000? The QC35s have brand new ear pads.",
-        time: "10:31",
-      },
-      {
-        id: "m3",
-        fromId: "u1",
-        text: "Deal. Want to meet at the Media Arts building tomorrow around 4:30? You can test the camera first.",
-        time: "10:33",
-      },
-    ],
-  },
-  {
-    id: "t2",
-    studentId: "u3",
-    listingId: "l3",
-    kind: "chat",
-    status: "active",
-    subject: "React debugging sessions (1hr)",
-    messages: [
-      {
-        id: "m4",
-        fromId: "u0",
-        text: "Hey David, my project build keeps failing with a hydration error. Any slots this week?",
-        time: "Tue 18:02",
-      },
-      {
-        id: "m5",
-        fromId: "u3",
-        text: "Classic. Thursday 6pm in the ACM lab? Bring your laptop — we'll squash it in one session.",
-        time: "Tue 18:15",
-      },
-    ],
-  },
-  {
-    id: "t3",
-    studentId: "u7",
-    listingId: "l8",
-    kind: "request",
-    status: "pending",
-    subject: "Wants your: Philips eye-care desk lamp",
-    messages: [
-      {
-        id: "m6",
-        fromId: "u7",
-        text: "Hi Aishwarya! Studio lighting is terrible and your lamp would save my eyes during model season. Could I pick it up Thursday? I can bring graph paper pads as a thank-you 🙏",
-        time: "09:12",
-      },
-    ],
-  },
-  {
-    id: "t4",
-    studentId: "u6",
-    listingId: "l13",
-    kind: "request",
-    status: "pending",
-    subject: "Offers: Intro to Statistics for your Bose QC35",
-    messages: [
-      {
-        id: "m8",
-        fromId: "u6",
-        text: "Hey! The AI matched us — I have the Stats textbook you requested, and I'd love your Bose headphones for my commute. Straight swap?",
-        time: "08:47",
-      },
-    ],
-  },
-  {
-    id: "t5",
-    studentId: "u9",
-    listingId: "l12",
-    kind: "request",
-    status: "accepted",
-    subject: "Calculus tutoring — Thu 5pm",
-    messages: [
-      {
-        id: "m9",
-        fromId: "u0",
-        text: "Hi Sam, I'd love the Thursday slot. Calc II integration by parts is ruining my week.",
-        time: "Mon 19:20",
-      },
-      {
-        id: "m10",
-        fromId: "u9",
-        text: "You're in! Math lounge, Thursday 5pm. Bring your last problem set and we'll start there.",
-        time: "Mon 19:41",
-      },
-      {
-        id: "m11",
-        fromId: "u0",
-        text: "Session done — you explained more in an hour than lecture did in a month. Thanks Sam!",
-        time: "Thu 18:10",
-      },
-    ],
-  },
-];
+export const seedThreads: Thread[] = [];
 
-export const seedReviews: Review[] = [
-  {
-    id: "rv1",
-    fromId: "u6",
-    fromName: "Priya Nair",
-    rating: 5,
-    text: "Smooth swap — the lamp was exactly as described and Aishwarya even threw in a spare bulb. Great communication.",
-    date: "Last week",
-  },
-  {
-    id: "rv2",
-    fromId: "u3",
-    fromName: "David Kim",
-    rating: 5,
-    text: "Traded an Arduino kit for a debugging session. Punctual, friendly, and the kit worked perfectly.",
-    date: "2 weeks ago",
-  },
-  {
-    id: "rv3",
-    fromId: "u4",
-    fromName: "Elena Garcia",
-    rating: 4,
-    text: "Bought my spare hackathon ticket from Aishwarya. Quick QR transfer, zero hassle.",
-    date: "Last month",
-  },
-  {
-    id: "rv4",
-    fromId: "u2",
-    fromName: "Jasmine Wu",
-    rating: 5,
-    text: "Aishwarya picked up my chem notes right on time and was super friendly. Would trade again!",
-    date: "Last month",
-  },
-];
+export const seedReviews: Review[] = [];
 
 export const imagePool: { src: string; label: string }[] = [
   { src: imgCamera, label: "Camera" },

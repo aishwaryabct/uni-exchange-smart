@@ -149,8 +149,8 @@ function LandingPage() {
 
               <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
                 REXchange is the college-only exchange platform where students buy, swap, give away,
-                and offer services safely within their university community — matched automatically by
-                our campus AI engine.
+                and offer services safely within their university community — matched automatically
+                by our campus AI engine.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-4">
@@ -222,8 +222,8 @@ function LandingPage() {
                   <div className="mt-3 rounded-xl bg-accent/60 p-2.5 text-[11px] text-muted-foreground">
                     <p className="font-medium text-foreground">Why REX AI matched this:</p>
                     <p className="mt-0.5 leading-snug">
-                      • Answers your request for STAT 201 textbook
-                      <br />• Priya wants headphones — matches your Bose QC35 listing
+                      • Answers your request for course materials
+                      <br />• Automatically matches trade preferences across campus
                     </p>
                   </div>
                 </div>
@@ -242,11 +242,7 @@ function LandingPage() {
                     <span className="text-xs font-bold text-primary">Sony A6000 Kit</span>
                   </div>
                   <div className="mt-2.5 flex items-center gap-3">
-                    <img
-                      src={imgCamera}
-                      alt="Camera"
-                      className="size-12 rounded-lg object-cover"
-                    />
+                    <img src={imgCamera} alt="Camera" className="size-12 rounded-lg object-cover" />
                     <p className="line-clamp-2 text-xs text-muted-foreground">
                       Looking to swap mirrorless camera for noise-cancelling headphones or an iPad.
                     </p>
@@ -294,12 +290,18 @@ function LandingPage() {
                     <div className="grid size-10 place-items-center rounded-xl bg-accent text-primary">
                       <Icon className="size-5" />
                     </div>
-                    <span className={`rounded-full px-2.5 py-0.5 text-[9px] font-bold uppercase ${item.badgeCls}`}>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[9px] font-bold uppercase ${item.badgeCls}`}
+                    >
                       {item.badge}
                     </span>
                   </div>
-                  <h3 className="mt-4 font-heading text-lg font-bold text-foreground">{item.title}</h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{item.desc}</p>
+                  <h3 className="mt-4 font-heading text-lg font-bold text-foreground">
+                    {item.title}
+                  </h3>
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    {item.desc}
+                  </p>
                 </div>
               );
             })}
@@ -355,13 +357,13 @@ function LandingPage() {
           <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary to-primary-dark p-8 text-primary-foreground shadow-2xl sm:p-12">
             <div className="relative z-10 max-w-2xl">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-card/20 px-3 py-1 text-xs font-bold uppercase tracking-wider">
-                <Sparkles className="size-3.5" /> Hackathon Demo Edition
+                <Sparkles className="size-3.5" /> Verified Campus Community
               </span>
               <h2 className="mt-4 font-heading text-3xl font-extrabold tracking-tight sm:text-4xl text-balance">
                 Ready to experience REXchange?
               </h2>
               <p className="mt-3 text-sm leading-relaxed text-primary-foreground/90 sm:text-base">
-                Jump into the demo dashboard to explore live student listings, test AI-powered
+                Jump into the dashboard to explore live student listings, discover AI-powered
                 matches, negotiate exchange requests, and see campus reputation ratings in action.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-4">
@@ -375,7 +377,7 @@ function LandingPage() {
                   to="/create"
                   className="inline-flex items-center gap-2 rounded-full border border-card/30 bg-card/10 px-6 py-3.5 text-sm font-bold text-primary-foreground transition-colors hover:bg-card/20"
                 >
-                  Post a Test Listing
+                  Post a Listing
                 </Link>
               </div>
             </div>
@@ -396,7 +398,7 @@ function LandingPage() {
             <span className="font-heading font-bold text-foreground">REXchange</span>
             <span className="text-muted-foreground">· Campus Community Exchange</span>
           </div>
-          <p>Built for the Hackathon · North Campus Community Edition</p>
+          <p>Built for students · North Campus Community Edition</p>
         </div>
       </footer>
     </div>
