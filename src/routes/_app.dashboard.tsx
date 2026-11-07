@@ -63,9 +63,9 @@ function DashboardPage() {
     }
   };
   const avgRating = profile
-    ? reviews.length
-      ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
-      : profile.rating.toFixed(1)
+    ? reviews.length > 0
+      ? `${(reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)} ★`
+      : "No reviews yet"
     : "—";
 
   return (
@@ -123,7 +123,15 @@ function DashboardPage() {
         <StatCard
           label="Average rating"
           value={isLoading ? "—" : avgRating}
-          hint={isLoading ? "Checking..." : profile ? "★★★★★ campus rep" : "sign in to view rep"}
+          hint={
+            isLoading
+              ? "Checking..."
+              : profile
+                ? reviews.length > 0
+                  ? "campus rep"
+                  : "complete trades to earn rep"
+                : "sign in to view rep"
+          }
           delay={100}
         />
         <StatCard

@@ -57,7 +57,7 @@ function heuristic(
   }
 
   const owner = getStudent(listing.ownerId, null, listing);
-  if (owner.rating >= 4.8) {
+  if (owner.rating >= 4.8 && owner.exchanges > 0) {
     score += 5;
     reasons.push(`Highly rated owner (${owner.rating.toFixed(1)}★, ${owner.exchanges} exchanges)`);
   }

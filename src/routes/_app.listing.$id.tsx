@@ -274,7 +274,9 @@ function ListingDetailPage() {
                 <div className="flex items-center gap-1.5">
                   <Stars rating={owner.rating} />
                   <span className="text-xs text-muted-foreground">
-                    {owner.rating.toFixed(1)} · {owner.exchanges} exchanges
+                    {owner.rating > 0 ? `${owner.rating.toFixed(1)} · ` : ""}
+                    {owner.exchanges} exchange{owner.exchanges === 1 ? "" : "s"}
+                    {owner.rating === 0 ? " · No reviews yet" : ""}
                   </span>
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">

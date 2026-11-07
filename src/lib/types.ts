@@ -124,6 +124,8 @@ export interface ChatMessage {
   senderId?: string | undefined;
   senderName?: string | undefined;
   createdAt?: Timestamp | undefined;
+  status?: "pending" | "sent" | "error" | undefined;
+  error?: string | undefined;
 }
 
 export interface Thread {
@@ -158,6 +160,7 @@ export function firestoreMessageToChatMessage(
     text: msg.text,
     createdAt: msg.createdAt,
     time: formattedTime ?? "Recently",
+    status: "sent",
   };
 }
 
@@ -221,4 +224,75 @@ export interface Review {
   rating: number;
   text: string;
   date: string;
+}
+
+export type NotificationType =
+  "message" | "request_received" | "request_accepted" | "request_declined" | "exchange_completed";
+
+export interface FirestoreNotification {
+  id: string;
+  recipientId: string;
+  senderId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  link: string;
+  read: boolean;
+  createdAt?: Timestamp | undefined;
+  threadId: string;
+  listingId?: string | undefined;
+}
+
+export interface InAppNotification {
+  id: string;
+  recipientId: string;
+  senderId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  link: string;
+  read: boolean;
+  createdAt: number;
+  threadId: string;
+  listingId?: string | undefined;
+}
+
+export function firestoreNotificationToInAppNotification(
+  notif: FirestoreNotification,
+): InAppNotification {
+  return {
+    id: notif.id,
+    recipientId: notif.recipientId,
+    senderId: notif.senderId,
+    type: notif.type,
+    title: notif.title,
+    body: notif.body,
+    link: notif.link,
+    read: notif.read,
+    createdAt: notif.createdAt?.toMillis?.() ?? Date.now(),
+    threadId: notif.threadId,
+    listingId: notif.listingId,
+  };
+}
+
+export function getDeterministicMessageNotificationId(threadId: string, messageId: string): string {
+  return `notif_msg_${threadId}_${messageId}`;
+}
+
+export function getDeterministicRequestNotificationId(
+  listingId: string,
+  requesterUid: string,
+): string {
+  return `notif_req_${listingId}_${requesterUid}`;
+}
+
+export function getDeterministicStatusNotificationId(
+  threadId: string,
+  status: "accepted" | "declined" | "completed",
+): string {
+  return `notif_status_${threadId}_${status}`;
+}
+
+export function getDeterministicNotificationLink(threadId: string): string {
+  return `/messages?thread=${threadId}`;
 }

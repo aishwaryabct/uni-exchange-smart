@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Inbox,
+  Loader2,
   MessageSquare,
   Send,
   X,
@@ -18,11 +19,12 @@ import { Avatar, StarInput } from "@/components/ui-bits";
 import { subscribeToThreadMessages } from "@/firebase";
 import { useAuth } from "@/lib/auth";
 import { getStudent } from "@/lib/data";
-import { actions, useAppState } from "@/lib/store";
+import { actions, isThreadUnread, useAppState } from "@/lib/store";
 import { firestoreMessageToChatMessage, type Thread } from "@/lib/types";
 
 const messagesSearchSchema = z.object({
   thread: fallback(z.string(), "").default(""),
+  threadId: fallback(z.string(), "").default(""),
   tab: fallback(z.string(), "chats").default("chats"),
 });
 
@@ -51,9 +53,11 @@ const statusStyles: Record<Thread["status"], string> = {
 };
 
 function MessagesPage() {
-  const { thread: threadId, tab } = Route.useSearch();
+  const search = Route.useSearch();
+  const threadId = search.thread || search.threadId || "";
+  const tab = search.tab;
   const navigate = useNavigate({ from: Route.fullPath });
-  const { threads, listings } = useAppState();
+  const { threads, listings, lastReadTimestamps } = useAppState();
   const { user, profile } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [draft, setDraft] = useState("");
@@ -82,6 +86,12 @@ function MessagesPage() {
           (t) => t.kind === "request" && t.status === "pending" && t.recipientId === activeUserId,
         ).length
       : 0;
+  const unreadChatsCount =
+    profile || user
+      ? threads.filter(
+          (t) => t.kind === "chat" && isThreadUnread(t, activeUserId, lastReadTimestamps),
+        ).length
+      : 0;
 
   const counterpartId = selected
     ? selected.creatorId === activeUserId
@@ -100,14 +110,25 @@ function MessagesPage() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [selected?.id, selected?.messages.length]);
 
-  // Real-time Firestore messages subscription for the selected cloud thread
+  // Mark active thread as read upon viewing or when new messages arrive
   useEffect(() => {
-    if (!selected?.id) return;
-    const isCloud = selected.id.startsWith("t_chat_") || selected.id.startsWith("t_req_");
+    if (selected?.id && activeUserId) {
+      actions.markThreadRead(selected.id);
+      actions.markThreadNotificationsRead(selected.id);
+    }
+  }, [selected?.id, selected?.messages.length, activeUserId]);
+
+  const selectedThreadId = selected?.id;
+
+  // Real-time Firestore messages subscription for the selected cloud thread
+  // Uses stable primitive selectedThreadId to prevent unneeded teardown & resubscription loops
+  useEffect(() => {
+    if (!selectedThreadId) return;
+    const isCloud = selectedThreadId.startsWith("t_chat_") || selectedThreadId.startsWith("t_req_");
     if (!isCloud) return;
 
     const unsubscribe = subscribeToThreadMessages(
-      selected.id,
+      selectedThreadId,
       (firestoreMessages) => {
         const chatMessages = firestoreMessages.map((m) => {
           let formattedTime = "Recently";
@@ -115,25 +136,22 @@ function MessagesPage() {
             const d = m.createdAt.toDate();
             formattedTime = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
           }
-          const isMsgMine = Boolean(activeUserId && m.senderId === activeUserId);
-          const msgSenderName = isMsgMine
-            ? profile?.name || user?.displayName || "You"
-            : getStudent(m.senderId, profile, selectedListing, listings).name ||
-              selectedStudent?.name ||
-              "Classmate";
-          return firestoreMessageToChatMessage(m, formattedTime, msgSenderName);
+          return firestoreMessageToChatMessage(m, formattedTime, m.senderName);
         });
-        actions.setThreadMessages(selected.id, chatMessages);
+        actions.setThreadMessages(selectedThreadId, chatMessages);
       },
       (err) => {
-        console.error(`[Messages] Error subscribing to thread messages for ${selected.id}:`, err);
+        console.error(
+          `[Messages] Error subscribing to thread messages for ${selectedThreadId}:`,
+          err,
+        );
       },
     );
 
     return () => {
       unsubscribe();
     };
-  }, [selected?.id, activeUserId, selectedListing, selectedStudent, profile, user, listings]);
+  }, [selectedThreadId]);
 
   if (!profile) {
     return (
@@ -173,11 +191,11 @@ function MessagesPage() {
     e.preventDefault();
     if (!selected || !draft.trim() || isSending) return;
     setActionError(null);
-    setIsSending(true);
     const textToSend = draft;
+    setDraft("");
+    setIsSending(true);
     try {
       await actions.sendMessage(selected.id, textToSend);
-      setDraft("");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to send message.";
       setActionError(msg);
@@ -199,13 +217,24 @@ function MessagesPage() {
         <button
           type="button"
           onClick={() => navigate({ to: ".", search: (prev) => ({ ...prev, tab: "chats" }) })}
-          className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+          className={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
             !isRequests
               ? "bg-primary text-primary-foreground"
               : "bg-card text-muted-foreground ring-1 ring-border hover:text-foreground"
           }`}
         >
           Chats
+          {unreadChatsCount > 0 && (
+            <span
+              className={`grid size-5 place-items-center rounded-full text-[10px] font-bold ${
+                !isRequests
+                  ? "bg-primary-foreground text-primary"
+                  : "bg-primary text-primary-foreground"
+              }`}
+            >
+              {unreadChatsCount}
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -259,29 +288,56 @@ function MessagesPage() {
               const student = getStudent(otherId, profile, listingForThread, listings);
               const last = thread.messages[thread.messages.length - 1];
               const active = selected?.id === thread.id;
+              const unread = isThreadUnread(thread, activeUserId, lastReadTimestamps);
               return (
                 <button
                   key={thread.id}
                   type="button"
                   onClick={() => selectThread(thread.id)}
-                  className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
+                  className={`relative flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
                     active
                       ? "border-primary bg-accent"
-                      : "border-border bg-card hover:border-primary/40"
+                      : unread
+                        ? "border-primary/40 bg-card hover:bg-accent/40"
+                        : "border-border bg-card hover:border-primary/40"
                   }`}
                 >
-                  <Avatar student={student} className="size-10 text-xs" />
+                  <div className="relative shrink-0">
+                    <Avatar student={student} className="size-10 text-xs" />
+                    {unread && (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-primary ring-2 ring-background"
+                        title="Unread messages"
+                      />
+                    )}
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-sm font-bold">{student.name}</p>
+                      <p
+                        className={`truncate text-sm ${
+                          unread ? "font-bold text-foreground" : "font-semibold"
+                        }`}
+                      >
+                        {student.name}
+                      </p>
                       <span
                         className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${statusStyles[thread.status]}`}
                       >
                         {thread.status}
                       </span>
                     </div>
-                    <p className="truncate text-xs font-medium text-primary">{thread.subject}</p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    <p
+                      className={`truncate text-xs ${
+                        unread ? "font-semibold text-primary" : "font-medium text-primary"
+                      }`}
+                    >
+                      {thread.subject}
+                    </p>
+                    <p
+                      className={`mt-0.5 truncate text-xs ${
+                        unread ? "font-medium text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
                       {thread.lastMessageText || (last ? last.text : "No messages yet")}
                     </p>
                   </div>
@@ -349,42 +405,95 @@ function MessagesPage() {
 
               {/* Messages */}
               <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto bg-muted/40 p-4">
-                {selected.messages.map((msg) => {
-                  const msgSenderId = msg.senderId || msg.fromId;
-                  const mine = Boolean(activeUserId && msgSenderId === activeUserId);
-                  const senderStudent =
-                    !mine && msgSenderId
-                      ? getStudent(msgSenderId, profile, selectedListing, listings)
-                      : undefined;
-                  const displayName = mine
-                    ? "You"
-                    : msg.senderName || senderStudent?.name || selectedStudent?.name || "Classmate";
-                  return (
-                    <div key={msg.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                {selected.messages.length === 0 ? (
+                  <div className="flex h-full flex-col items-center justify-center p-8 text-center text-muted-foreground">
+                    <MessageSquare className="size-8 opacity-30" />
+                    <p className="mt-2 text-sm font-semibold">No messages yet</p>
+                    <p className="mt-1 text-xs">
+                      Say hello or coordinate exchange details to get started.
+                    </p>
+                  </div>
+                ) : (
+                  selected.messages.map((msg) => {
+                    const msgSenderId = msg.senderId || msg.fromId;
+                    const mine = Boolean(activeUserId && msgSenderId === activeUserId);
+                    const senderStudent =
+                      !mine && msgSenderId
+                        ? getStudent(msgSenderId, profile, selectedListing, listings)
+                        : undefined;
+                    const displayName = mine
+                      ? "You"
+                      : msg.senderName ||
+                        senderStudent?.name ||
+                        selectedStudent?.name ||
+                        "Classmate";
+                    const isPending = msg.status === "pending";
+                    const isError = msg.status === "error";
+
+                    return (
                       <div
-                        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm ${
-                          mine
-                            ? "rounded-br-sm bg-primary text-primary-foreground"
-                            : "rounded-bl-sm border border-border bg-card"
-                        }`}
+                        key={msg.id}
+                        className={`flex ${mine ? "justify-end" : "justify-start"}`}
                       >
-                        {!mine && (
-                          <p className="mb-1 text-[11px] font-semibold text-primary">
-                            {displayName}
-                          </p>
-                        )}
-                        <p className="leading-relaxed">{msg.text}</p>
-                        <p
-                          className={`mt-1 text-right text-[9px] ${
-                            mine ? "text-primary-foreground/60" : "text-muted-foreground"
+                        <div
+                          className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm transition-all ${
+                            mine
+                              ? isError
+                                ? "rounded-br-sm border border-destructive/40 bg-destructive/15 text-foreground"
+                                : isPending
+                                  ? "rounded-br-sm bg-primary/80 text-primary-foreground"
+                                  : "rounded-br-sm bg-primary text-primary-foreground"
+                              : "rounded-bl-sm border border-border bg-card"
                           }`}
                         >
-                          {msg.time}
-                        </p>
+                          {!mine && (
+                            <p className="mb-1 text-[11px] font-semibold text-primary">
+                              {displayName}
+                            </p>
+                          )}
+                          <p className="leading-relaxed whitespace-pre-wrap break-words">
+                            {msg.text}
+                          </p>
+                          <div
+                            className={`mt-1 flex items-center justify-end gap-1 text-[9px] ${
+                              mine
+                                ? isError
+                                  ? "text-destructive"
+                                  : "text-primary-foreground/75"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            {isPending && (
+                              <>
+                                <Loader2 className="size-2.5 animate-spin" />
+                                <span>Sending…</span>
+                              </>
+                            )}
+                            {isError && (
+                              <>
+                                <AlertCircle className="size-3 text-destructive" />
+                                <span>Failed to send</span>
+                                <button
+                                  type="button"
+                                  onClick={() => actions.retrySendMessage(selected.id, msg.id)}
+                                  className="ml-1.5 font-bold underline hover:no-underline"
+                                >
+                                  Retry
+                                </button>
+                              </>
+                            )}
+                            {!isPending && !isError && (
+                              <>
+                                <span>{msg.time}</span>
+                                {mine && <Check className="size-2.5 opacity-80" />}
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
 
               {/* Request actions */}

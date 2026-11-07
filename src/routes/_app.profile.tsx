@@ -145,7 +145,8 @@ function ProfilePage() {
 
   // 3. Authenticated student profile
   const myListings = listings.filter((l) => l.ownerId === profile.uid);
-  const avgRating = profile.rating;
+  const avgRating =
+    reviews.length > 0 ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length : 0;
   const totalExchanges = (profile.exchanges || 0) + completedThisSession;
 
   const trustBadges = [
@@ -176,10 +177,16 @@ function ProfilePage() {
             </p>
             <div className="mt-2 flex items-center gap-2">
               <Stars rating={avgRating} className="size-4" />
-              <span className="text-sm font-semibold">{avgRating.toFixed(1)}</span>
-              <span className="text-xs text-muted-foreground">
-                ({reviews.length} review{reviews.length === 1 ? "" : "s"})
-              </span>
+              {reviews.length > 0 ? (
+                <>
+                  <span className="text-sm font-semibold">{avgRating.toFixed(1)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    ({reviews.length} review{reviews.length === 1 ? "" : "s"})
+                  </span>
+                </>
+              ) : (
+                <span className="text-xs font-medium text-muted-foreground">No reviews yet</span>
+              )}
             </div>
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted-foreground">
               {profile.bio}
@@ -221,7 +228,11 @@ function ProfilePage() {
 
       {/* Stats */}
       <section className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Reputation" value={avgRating.toFixed(1)} hint="★ campus rating" />
+        <StatCard
+          label="Reputation"
+          value={reviews.length > 0 ? `${avgRating.toFixed(1)} ★` : "0.0"}
+          hint={reviews.length > 0 ? "campus rating" : "No reviews yet"}
+        />
         <StatCard
           label="Completed exchanges"
           value={String(totalExchanges)}

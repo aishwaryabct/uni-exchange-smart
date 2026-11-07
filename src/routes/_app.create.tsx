@@ -1,21 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import {
-  Gift,
-  Image as ImageIcon,
-  Loader2,
-  LogIn,
-  Megaphone,
-  Plus,
-  Repeat2,
-  Tag,
-  Wrench,
-} from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { Gift, Loader2, LogIn, Megaphone, Plus, Repeat2, Tag, Wrench } from "lucide-react";
+import { useState, useMemo, useEffect, type FormEvent } from "react";
 import { PageContainer } from "@/components/app-shell";
 import { AuthModal } from "@/components/auth-modal";
+import { AvailabilityPicker } from "@/components/availability-picker";
+import { ImageUploader } from "@/components/image-uploader";
 import { ListingCard } from "@/components/listing-card";
+import { uploadListingImage } from "@/firebase";
 import { useAuth } from "@/lib/auth";
-import { imagePool } from "@/lib/data";
 import { actions } from "@/lib/store";
 import { CATEGORIES, type Category, type Listing, type ListingType } from "@/lib/types";
 
@@ -67,9 +59,24 @@ function CreateListingPage() {
   const [price, setPrice] = useState("");
   const [exchangePref, setExchangePref] = useState("");
   const [availability, setAvailability] = useState("");
-  const [imageIdx, setImageIdx] = useState(0);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | undefined>(undefined);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const isPhysical = type === "sell" || type === "exchange" || type === "giveaway";
+
+  useEffect(() => {
+    if (!selectedImageFile) {
+      setPreviewImageUrl(undefined);
+      return;
+    }
+    const url = URL.createObjectURL(selectedImageFile);
+    setPreviewImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedImageFile]);
 
   const preview: Listing = {
     id: "preview",
@@ -86,7 +93,7 @@ function CreateListingPage() {
     department: profile?.department || "Computer Science",
     year: profile?.year || "Year 1",
     availability: availability || "Flexible",
-    image: imagePool[imageIdx]?.src,
+    image: previewImageUrl,
     postedHours: 0,
     keywords: [],
     ownerName: profile?.name,
@@ -121,8 +128,35 @@ function CreateListingPage() {
       return;
     }
 
+    if (isPhysical && !selectedImageFile && !previewImageUrl) {
+      setError("A real photo is required for physical items (sell, exchange, or giveaway).");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
+      let finalImageUrl: string | undefined = undefined;
+      if (selectedImageFile) {
+        setIsUploadingImage(true);
+        setUploadProgress(0);
+        try {
+          finalImageUrl = await uploadListingImage(selectedImageFile, profile.uid, (p) => {
+            setUploadProgress(p);
+          });
+        } catch (uploadErr: unknown) {
+          const msg =
+            uploadErr instanceof Error
+              ? uploadErr.message
+              : "Failed to upload photo. Please check your image and try again.";
+          setError(msg);
+          setIsSubmitting(false);
+          setIsUploadingImage(false);
+          return;
+        } finally {
+          setIsUploadingImage(false);
+        }
+      }
+
       const id = await actions.addListing(
         {
           title: trimmedTitle,
@@ -134,7 +168,7 @@ function CreateListingPage() {
           exchangePref:
             type !== "sell" && type !== "giveaway" ? exchangePref.trim() || undefined : undefined,
           availability: availability.trim() || "Flexible",
-          image: imagePool[imageIdx]?.src,
+          image: finalImageUrl,
           keywords: title
             .toLowerCase()
             .replace(/[^a-z0-9\s]/g, " ")
@@ -333,41 +367,24 @@ function CreateListingPage() {
             <label htmlFor="availability" className={labelCls}>
               Availability / pickup
             </label>
-            <input
-              id="availability"
-              value={availability}
-              onChange={(e) => setAvailability(e.target.value)}
-              placeholder="Weekdays after 4pm · Main Hall"
-              className={inputCls}
-            />
+            <AvailabilityPicker id="availability" value={availability} onChange={setAvailability} />
           </div>
 
           <div>
-            <span className={labelCls}>Photo</span>
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-              {imagePool.map((img, i) => (
-                <button
-                  key={img.label}
-                  type="button"
-                  onClick={() => setImageIdx(i)}
-                  className={`group relative overflow-hidden rounded-lg border-2 transition-colors ${
-                    imageIdx === i ? "border-primary" : "border-transparent hover:border-primary/40"
-                  }`}
-                  title={img.label}
-                >
-                  <img
-                    src={img.src}
-                    alt={img.label}
-                    loading="lazy"
-                    width={800}
-                    height={600}
-                    className="aspect-[4/3] w-full object-cover"
-                  />
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-              <ImageIcon className="size-3" /> Demo mode: pick a campus photo for your listing.
+            <span className={labelCls}>Item Photo</span>
+            <ImageUploader
+              previewFile={selectedImageFile}
+              value={previewImageUrl}
+              onFileSelect={(file) => setSelectedImageFile(file)}
+              required={isPhysical}
+              isUploading={isUploadingImage}
+              uploadProgress={uploadProgress}
+              disabled={isSubmitting}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {isPhysical
+                ? "Physical goods (sell, exchange, giveaway) require at least one real photo."
+                : "Photos are optional for services and requests."}
             </p>
           </div>
 

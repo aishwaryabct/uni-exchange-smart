@@ -3,9 +3,10 @@ import { LogIn, LogOut, Plus, Search } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useAuth, authActions } from "@/lib/auth";
 import { currentUser } from "@/lib/data";
-import { useAppState } from "@/lib/store";
+import { isThreadUnread, useAppState } from "@/lib/store";
 import { AuthModal } from "./auth-modal";
 import { Avatar } from "./ui-bits";
+import { NotificationCenter } from "./notification-center";
 
 const navLinks = [
   { to: "/dashboard", label: "Dashboard" },
@@ -41,8 +42,21 @@ function AppNav() {
   const [query, setQuery] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const { user, profile } = useAuth();
-  const { threads } = useAppState();
-  const pendingCount = threads.filter((t) => t.kind === "request" && t.status === "pending").length;
+  const { threads, lastReadTimestamps } = useAppState();
+  const activeUserId = profile?.uid || user?.uid || "";
+  const pendingRequestsCount =
+    profile || user
+      ? threads.filter(
+          (t) => t.kind === "request" && t.status === "pending" && t.recipientId === activeUserId,
+        ).length
+      : 0;
+  const unreadChatsCount =
+    profile || user
+      ? threads.filter(
+          (t) => t.kind === "chat" && isThreadUnread(t, activeUserId, lastReadTimestamps),
+        ).length
+      : 0;
+  const totalUnread = pendingRequestsCount + unreadChatsCount;
 
   function onSearch(e: FormEvent) {
     e.preventDefault();
@@ -77,9 +91,9 @@ function AppNav() {
                   activeProps={{ className: `${linkClass} text-primary` }}
                 >
                   {link.label}
-                  {link.label === "Messages" && pendingCount > 0 && (
+                  {link.label === "Messages" && totalUnread > 0 && (
                     <span className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
-                      {pendingCount}
+                      {totalUnread > 9 ? "9+" : totalUnread}
                     </span>
                   )}
                 </Link>
@@ -115,12 +129,16 @@ function AppNav() {
               <Plus className="size-5" />
             </Link>
 
+            {(profile || user) && <NotificationCenter />}
+
             {profile ? (
               <div className="flex items-center gap-2 border-l border-border pl-3">
                 <Link to="/profile" className="flex items-center gap-2.5">
                   <div className="hidden text-right md:block">
                     <p className="text-xs font-semibold">{profile.name}</p>
-                    <p className="text-[10px] text-muted-foreground">Rep: {profile.rating} ★</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {profile.rating > 0 ? `Rep: ${profile.rating.toFixed(1)} ★` : "New member"}
+                    </p>
                   </div>
                   <Avatar student={profile} className="size-9 text-xs ring-2 ring-border" />
                 </Link>
@@ -154,13 +172,18 @@ function AppNav() {
             <Link
               key={link.to}
               to={link.to}
-              className="whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium text-muted-foreground"
+              className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium text-muted-foreground"
               activeProps={{
                 className:
-                  "whitespace-nowrap rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground",
+                  "inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground",
               }}
             >
               {link.label}
+              {link.label === "Messages" && totalUnread > 0 && (
+                <span className="grid size-4 place-items-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
+                  {totalUnread > 9 ? "9+" : totalUnread}
+                </span>
+              )}
             </Link>
           ))}
           {profile ? (

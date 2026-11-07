@@ -186,7 +186,9 @@ function MatchesPage() {
                       <Avatar student={owner} className="size-6 text-[9px]" />
                       <span className="text-xs font-medium">{owner.name}</span>
                       <span className="text-[10px] text-muted-foreground">
-                        ★ {owner.rating.toFixed(1)} · {owner.exchanges} exchanges
+                        {owner.rating > 0
+                          ? `★ ${owner.rating.toFixed(1)} · ${owner.exchanges} exchanges`
+                          : "No reviews yet"}
                       </span>
                     </div>
                   </div>

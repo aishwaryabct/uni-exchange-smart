@@ -135,7 +135,7 @@ export function AuthModal({
           </div>
           <DialogDescription className="text-xs text-muted-foreground">
             {mode === "signin"
-              ? "Access your listings, AI matches, and campus reputation."
+              ? "Sign in with your campus account to manage listings, view AI matches, and message classmates."
               : "Create your student account to trade gear, notes, and skills safely."}
           </DialogDescription>
         </DialogHeader>

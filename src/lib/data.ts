@@ -183,7 +183,7 @@ export function getStudent(
     color: getDepartmentColor(dept),
     department: dept,
     year: finalYear,
-    rating: 5.0,
+    rating: 0,
     exchanges: 0,
     joined: "Recently",
     bio: "Student on REXchange marketplace.",

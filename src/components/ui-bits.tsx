@@ -47,7 +47,33 @@ export function MatchPill({ score }: { score: number }) {
   );
 }
 
-export function Stars({ rating, className = "size-3.5" }: { rating: number; className?: string }) {
+export function Stars({
+  rating,
+  className = "size-3.5",
+  showZeroLabel = false,
+}: {
+  rating: number;
+  className?: string;
+  showZeroLabel?: boolean;
+}) {
+  if (rating <= 0) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+        aria-label="No reviews yet"
+      >
+        <span className="inline-flex items-center gap-0.5">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <Star key={i} className={`${className} fill-none text-muted-foreground/40`} />
+          ))}
+        </span>
+        {showZeroLabel && (
+          <span className="text-[11px] font-medium text-muted-foreground">No reviews yet</span>
+        )}
+      </span>
+    );
+  }
+
   return (
     <span className="inline-flex items-center gap-0.5" aria-label={`${rating} out of 5 stars`}>
       {[1, 2, 3, 4, 5].map((i) => (

@@ -7,20 +7,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { CATEGORIES, type Category, type Listing, type ListingType } from "@/lib/types";
-import { imagePool } from "@/lib/data";
 import { actions } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
-import {
-  AlertCircle,
-  Gift,
-  Image as ImageIcon,
-  Loader2,
-  Megaphone,
-  Repeat2,
-  Tag,
-  Wrench,
-  Check,
-} from "lucide-react";
+import { AvailabilityPicker } from "@/components/availability-picker";
+import { ImageUploader } from "@/components/image-uploader";
+import { uploadListingImage } from "@/firebase";
+import { AlertCircle, Gift, Loader2, Megaphone, Repeat2, Tag, Wrench, Check } from "lucide-react";
 
 interface EditListingModalProps {
   open: boolean;
@@ -57,9 +49,14 @@ export function EditListingModal({ open, onOpenChange, listing }: EditListingMod
   const [price, setPrice] = useState(listing.price !== undefined ? String(listing.price) : "");
   const [exchangePref, setExchangePref] = useState(listing.exchangePref || "");
   const [availability, setAvailability] = useState(listing.availability || "");
-  const [imageIdx, setImageIdx] = useState(0);
+  const [imageUrl, setImageUrl] = useState<string | undefined>(listing.image);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isPhysical = type === "sell" || type === "exchange" || type === "giveaway";
 
   useEffect(() => {
     if (open) {
@@ -71,8 +68,8 @@ export function EditListingModal({ open, onOpenChange, listing }: EditListingMod
       setPrice(listing.price !== undefined ? String(listing.price) : "");
       setExchangePref(listing.exchangePref || "");
       setAvailability(listing.availability || "");
-      const idx = imagePool.findIndex((img) => img.src === listing.image);
-      setImageIdx(idx >= 0 ? idx : 0);
+      setImageUrl(listing.image);
+      setSelectedFile(null);
       setError(null);
     }
   }, [open, listing]);
@@ -102,9 +99,36 @@ export function EditListingModal({ open, onOpenChange, listing }: EditListingMod
       return;
     }
 
+    if (isPhysical && !imageUrl && !selectedFile) {
+      setError("A real photo is required for physical items (sell, exchange, or giveaway).");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
+      let finalImage = imageUrl;
+      if (selectedFile) {
+        setIsUploading(true);
+        setUploadProgress(0);
+        try {
+          finalImage = await uploadListingImage(selectedFile, profile.uid, (p) => {
+            setUploadProgress(p);
+          });
+        } catch (uploadErr: unknown) {
+          const msg =
+            uploadErr instanceof Error
+              ? uploadErr.message
+              : "Failed to upload photo. Please check your image and try again.";
+          setError(msg);
+          setLoading(false);
+          setIsUploading(false);
+          return;
+        } finally {
+          setIsUploading(false);
+        }
+      }
+
       await actions.updateListing(
         listing.id,
         {
@@ -117,7 +141,7 @@ export function EditListingModal({ open, onOpenChange, listing }: EditListingMod
           exchangePref:
             type !== "sell" && type !== "giveaway" ? exchangePref.trim() || undefined : undefined,
           availability: availability.trim() || "Flexible",
-          image: imagePool[imageIdx]?.src,
+          image: finalImage,
         },
         profile.uid,
       );
@@ -289,40 +313,31 @@ export function EditListingModal({ open, onOpenChange, listing }: EditListingMod
             <label htmlFor="edit-availability" className={labelCls}>
               Availability / pickup
             </label>
-            <input
+            <AvailabilityPicker
               id="edit-availability"
               value={availability}
-              onChange={(e) => setAvailability(e.target.value)}
-              className={inputCls}
+              onChange={setAvailability}
             />
           </div>
 
           <div>
-            <span className={labelCls}>Photo</span>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-              {imagePool.map((img, i) => (
-                <button
-                  key={img.label}
-                  type="button"
-                  onClick={() => setImageIdx(i)}
-                  className={`group relative overflow-hidden rounded-lg border-2 transition-colors ${
-                    imageIdx === i ? "border-primary" : "border-transparent hover:border-primary/40"
-                  }`}
-                  title={img.label}
-                >
-                  <img
-                    src={img.src}
-                    alt={img.label}
-                    loading="lazy"
-                    width={200}
-                    height={150}
-                    className="aspect-[4/3] w-full object-cover"
-                  />
-                </button>
-              ))}
-            </div>
-            <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
-              <ImageIcon className="size-3" /> Select a campus photo to associate with your listing.
+            <span className={labelCls}>Item Photo</span>
+            <ImageUploader
+              previewFile={selectedFile}
+              value={imageUrl}
+              onFileSelect={(file) => {
+                setSelectedFile(file);
+                if (!file) setImageUrl(undefined);
+              }}
+              required={isPhysical}
+              isUploading={isUploading}
+              uploadProgress={uploadProgress}
+              disabled={loading}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {isPhysical
+                ? "Physical goods (sell, exchange, giveaway) require at least one real photo."
+                : "Photos are optional for services and requests."}
             </p>
           </div>
 

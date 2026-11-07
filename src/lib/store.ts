@@ -4,12 +4,17 @@ import type { Unsubscribe } from "firebase/firestore";
 import {
   auth,
   deleteListingFromFirestore,
+  deleteNotificationInFirestore,
   getCurrentUser,
   getOrCreateThreadInFirestore,
   isFirebaseConfigured,
+  markAllNotificationsReadInFirestore,
+  markNotificationReadInFirestore,
+  markNotificationsForThreadReadInFirestore,
   saveListingToFirestore,
   sendMessageBatchToFirestore,
   subscribeToListings,
+  subscribeToUserNotifications,
   subscribeToUserThreads,
   updateThreadStatusInFirestore,
 } from "../firebase";
@@ -17,9 +22,12 @@ import { getCachedProfile, getInitials } from "./auth";
 import { getStudent, seedListings, seedReviews, seedThreads } from "./data";
 import {
   firestoreMessageToChatMessage,
+  firestoreNotificationToInAppNotification,
   firestoreThreadToThread,
   type ChatMessage,
+  type FirestoreNotification,
   type FirestoreThread,
+  type InAppNotification,
   type Listing,
   type Review,
   type Thread,
@@ -31,12 +39,17 @@ interface AppState {
   threads: Thread[];
   reviews: Review[];
   completedThisSession: number;
+  lastReadTimestamps: Record<string, number>;
+  notifications: InAppNotification[];
+  isNotificationsLoading: boolean;
 }
 
 interface UserScopedData {
   threads: Thread[];
   reviews: Review[];
   completedThisSession: number;
+  lastReadTimestamps?: Record<string, number>;
+  notifications?: InAppNotification[];
 }
 
 const PUBLIC_LISTINGS_STORAGE_KEY = "rexchange_public_listings_v1";
@@ -238,10 +251,27 @@ function loadUserData(uid: string, currentListings: Listing[]): UserScopedData {
         const completedThisSession =
           typeof parsed.completedThisSession === "number" ? parsed.completedThisSession : 0;
 
+        const lastReadTimestamps =
+          parsed.lastReadTimestamps && typeof parsed.lastReadTimestamps === "object"
+            ? (parsed.lastReadTimestamps as Record<string, number>)
+            : {};
+
+        const validNotifications = Array.isArray(parsed.notifications)
+          ? (parsed.notifications.filter(
+              (n: unknown) =>
+                n &&
+                typeof n === "object" &&
+                typeof (n as InAppNotification).id === "string" &&
+                (n as InAppNotification).recipientId === uid,
+            ) as InAppNotification[])
+          : [];
+
         return {
           threads: validThreads,
           reviews: validReviews,
           completedThisSession,
+          lastReadTimestamps,
+          notifications: validNotifications,
         };
       }
     }
@@ -287,6 +317,7 @@ function loadUserData(uid: string, currentListings: Listing[]): UserScopedData {
           threads: migratedThreads,
           reviews: migratedReviews,
           completedThisSession: completedCount,
+          notifications: [],
         };
 
         // Save migrated data to the user-scoped key so subsequent loads read from step 1
@@ -299,7 +330,13 @@ function loadUserData(uid: string, currentListings: Listing[]): UserScopedData {
     console.warn(`[Store] Failed to load/migrate user data for ${uid}:`, err);
   }
 
-  return { threads: seedThreads, reviews: seedReviews, completedThisSession: 0 };
+  return {
+    threads: seedThreads,
+    reviews: seedReviews,
+    completedThisSession: 0,
+    lastReadTimestamps: {},
+    notifications: [],
+  };
 }
 
 function saveUserData(uid: string, data: UserScopedData): void {
@@ -314,6 +351,8 @@ function saveUserData(uid: string, data: UserScopedData): void {
       threads: scopedThreads,
       reviews: data.reviews,
       completedThisSession: data.completedThisSession,
+      lastReadTimestamps: data.lastReadTimestamps ?? {},
+      notifications: data.notifications ?? [],
     };
 
     window.localStorage.setItem(getUserStorageKey(uid), JSON.stringify(payload));
@@ -329,6 +368,9 @@ function loadInitialState(): AppState {
       threads: seedThreads,
       reviews: seedReviews,
       completedThisSession: 0,
+      lastReadTimestamps: {},
+      notifications: [],
+      isNotificationsLoading: false,
     };
   }
   try {
@@ -346,6 +388,9 @@ function loadInitialState(): AppState {
       threads: seedThreads,
       reviews: seedReviews,
       completedThisSession: 0,
+      lastReadTimestamps: {},
+      notifications: [],
+      isNotificationsLoading: false,
     };
   } catch (err) {
     console.warn("[Store] Failed to load initial state:", err);
@@ -355,6 +400,9 @@ function loadInitialState(): AppState {
     threads: seedThreads,
     reviews: seedReviews,
     completedThisSession: 0,
+    lastReadTimestamps: {},
+    notifications: [],
+    isNotificationsLoading: false,
   };
 }
 
@@ -363,10 +411,14 @@ const serverSnapshot: AppState = {
   threads: seedThreads,
   reviews: seedReviews,
   completedThisSession: 0,
+  lastReadTimestamps: {},
+  notifications: [],
+  isNotificationsLoading: false,
 };
 
 let activeAuthenticatedUid: string | null = null;
 let unsubscribeThreadsListener: Unsubscribe | null = null;
+let unsubscribeNotificationsListener: Unsubscribe | null = null;
 let state: AppState = loadInitialState();
 
 const listeners = new Set<() => void>();
@@ -383,6 +435,8 @@ function saveState(s: AppState) {
       threads: s.threads,
       reviews: s.reviews,
       completedThisSession: s.completedThisSession,
+      lastReadTimestamps: s.lastReadTimestamps,
+      notifications: s.notifications,
     });
   }
 }
@@ -396,10 +450,14 @@ function setState(updater: (s: AppState) => AppState) {
 export function syncUserSession(uid: string | null) {
   if (uid === activeAuthenticatedUid) return;
 
-  // Unsubscribe previous user threads listener before switching accounts or clearing
+  // Unsubscribe previous listeners before switching accounts or clearing
   if (unsubscribeThreadsListener) {
     unsubscribeThreadsListener();
     unsubscribeThreadsListener = null;
+  }
+  if (unsubscribeNotificationsListener) {
+    unsubscribeNotificationsListener();
+    unsubscribeNotificationsListener = null;
   }
 
   activeAuthenticatedUid = uid;
@@ -412,6 +470,9 @@ export function syncUserSession(uid: string | null) {
       threads: userData.threads,
       reviews: userData.reviews,
       completedThisSession: userData.completedThisSession,
+      lastReadTimestamps: userData.lastReadTimestamps ?? {},
+      notifications: userData.notifications ?? [],
+      isNotificationsLoading: true,
     }));
 
     // Subscribe to Firestore threads for this authenticated student
@@ -441,6 +502,31 @@ export function syncUserSession(uid: string | null) {
         console.error("[Store] Failed to subscribe to Firestore threads:", err);
       },
     );
+
+    // Subscribe to Firestore notifications for this authenticated student (bounded limit(50))
+    unsubscribeNotificationsListener = subscribeToUserNotifications(
+      uid,
+      (remoteNotifs: FirestoreNotification[]) => {
+        setState((s) => {
+          const cloudNotifs = remoteNotifs.map(firestoreNotificationToInAppNotification);
+          const cloudIds = new Set(cloudNotifs.map((n) => n.id));
+          const localOnly = s.notifications.filter(
+            (n) => !cloudIds.has(n.id) && n.recipientId === uid,
+          );
+          const combined = [...cloudNotifs, ...localOnly].sort((a, b) => b.createdAt - a.createdAt);
+
+          return {
+            ...s,
+            notifications: combined,
+            isNotificationsLoading: false,
+          };
+        });
+      },
+      (err) => {
+        console.error("[Store] Failed to subscribe to Firestore notifications:", err);
+        setState((s) => ({ ...s, isNotificationsLoading: false }));
+      },
+    );
   } else {
     // User signed out or guest: clear private data from memory
     setState((s) => ({
@@ -448,6 +534,9 @@ export function syncUserSession(uid: string | null) {
       threads: seedThreads,
       reviews: seedReviews,
       completedThisSession: 0,
+      lastReadTimestamps: {},
+      notifications: [],
+      isNotificationsLoading: false,
     }));
   }
 }
@@ -473,6 +562,8 @@ export function useAppState(): AppState {
 function nextId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
+
+let lastMessageSubmissionTime = 0;
 
 export const actions = {
   async addListing(
@@ -691,16 +782,34 @@ export const actions = {
     }
   },
 
-  setThreadMessages(threadId: string, messages: ChatMessage[]): void {
+  setThreadMessages(threadId: string, remoteMessages: ChatMessage[]): void {
     setState((s) => ({
       ...s,
-      threads: s.threads.map((t) => (t.id === threadId ? { ...t, messages } : t)),
+      threads: s.threads.map((t) => {
+        if (t.id !== threadId) return t;
+        // Keep any local optimistic pending or error messages that haven't appeared in the remote snapshot yet
+        const remoteIds = new Set(remoteMessages.map((m) => m.id));
+        const pendingOrError = t.messages.filter(
+          (m) => (m.status === "pending" || m.status === "error") && !remoteIds.has(m.id),
+        );
+        return {
+          ...t,
+          messages: [...remoteMessages, ...pendingOrError],
+        };
+      }),
     }));
   },
 
   async sendMessage(threadId: string, text: string): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
+
+    // 500ms composer submission cooldown
+    const submissionNow = Date.now();
+    if (submissionNow - lastMessageSubmissionTime < 500) {
+      throw new Error("Please wait a moment before sending another message.");
+    }
+    lastMessageSubmissionTime = submissionNow;
 
     const authenticatedUser = getCurrentUser();
     if (!authenticatedUser) {
@@ -714,17 +823,81 @@ export const actions = {
     const cachedProfile = getCachedProfile(callerUid);
     const callerName = cachedProfile?.name || authenticatedUser.displayName || "Student";
     const isCloud = threadId.startsWith("t_chat_") || threadId.startsWith("t_req_");
+    const messageId = nextId("m");
+
+    const thread = state.threads.find((t) => t.id === threadId);
+    const recipientId =
+      thread?.participantIds?.find((id) => id !== callerUid) ??
+      (thread?.recipientId === callerUid ? thread?.creatorId : thread?.recipientId);
+    const listingId = thread?.listingId;
+
+    // Optimistic message displayed immediately
+    const optimisticMsg: ChatMessage = {
+      id: messageId,
+      fromId: callerUid,
+      senderId: callerUid,
+      senderName: callerName,
+      text: trimmed,
+      time: "Sending…",
+      status: "pending",
+    };
+
+    setState((s) => ({
+      ...s,
+      threads: s.threads.map((t) => {
+        if (t.id !== threadId) return t;
+        return {
+          ...t,
+          lastMessageText: trimmed,
+          lastMessageSenderId: callerUid,
+          messages: [...t.messages, optimisticMsg],
+        };
+      }),
+    }));
 
     if (isCloud) {
-      const messageId = nextId("m");
-
-      // Atomic batch write in Firestore; errors bubble up to caller (never silently fallback)
-      await sendMessageBatchToFirestore(threadId, messageId, trimmed, callerUid, callerName);
+      try {
+        await sendMessageBatchToFirestore(
+          threadId,
+          messageId,
+          trimmed,
+          callerUid,
+          callerName,
+          recipientId,
+          listingId,
+        );
+        setState((s) => ({
+          ...s,
+          threads: s.threads.map((t) => {
+            if (t.id !== threadId) return t;
+            return {
+              ...t,
+              messages: t.messages.map((m) =>
+                m.id === messageId ? { ...m, status: "sent", time: "Just now" } : m,
+              ),
+            };
+          }),
+        }));
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : "Failed to send message.";
+        setState((s) => ({
+          ...s,
+          threads: s.threads.map((t) => {
+            if (t.id !== threadId) return t;
+            return {
+              ...t,
+              messages: t.messages.map((m) =>
+                m.id === messageId ? { ...m, status: "error", error: errMsg } : m,
+              ),
+            };
+          }),
+        }));
+        throw err;
+      }
       return;
     }
 
     // Legacy local thread fallback
-    const thread = state.threads.find((t) => t.id === threadId);
     if (!thread) {
       console.warn(`[Store] Thread ${threadId} not found`);
       throw new Error("Conversation thread not found.");
@@ -737,20 +910,118 @@ export const actions = {
       throw new Error("You are not authorized to send messages in this thread.");
     }
 
-    const msg: ChatMessage = {
-      id: nextId("m"),
-      fromId: callerUid,
-      senderId: callerUid,
-      senderName: callerName,
-      text: trimmed,
-      time: "Now",
-    };
+    setState((s) => ({
+      ...s,
+      threads: s.threads.map((t) => {
+        if (t.id !== threadId) return t;
+        return {
+          ...t,
+          messages: t.messages.map((m) =>
+            m.id === messageId ? { ...m, status: "sent", time: "Now" } : m,
+          ),
+        };
+      }),
+    }));
+  },
+
+  async retrySendMessage(threadId: string, messageId: string): Promise<void> {
+    const thread = state.threads.find((t) => t.id === threadId);
+    const msg = thread?.messages.find((m) => m.id === messageId);
+    if (!thread || !msg) return;
+
+    const authenticatedUser = getCurrentUser();
+    if (!authenticatedUser) {
+      throw new Error("You must be signed in to send a message.");
+    }
+
+    const callerUid = authenticatedUser.uid;
+    const cachedProfile = getCachedProfile(callerUid);
+    const callerName = cachedProfile?.name || authenticatedUser.displayName || "Student";
+    const isCloud = threadId.startsWith("t_chat_") || threadId.startsWith("t_req_");
+    const recipientId =
+      thread.participantIds?.find((id) => id !== callerUid) ??
+      (thread.recipientId === callerUid ? thread.creatorId : thread.recipientId);
+    const listingId = thread.listingId;
 
     setState((s) => ({
       ...s,
-      threads: s.threads.map((t) =>
-        t.id === threadId ? { ...t, messages: [...t.messages, msg] } : t,
-      ),
+      threads: s.threads.map((t) => {
+        if (t.id !== threadId) return t;
+        return {
+          ...t,
+          messages: t.messages.map((m) =>
+            m.id === messageId
+              ? { ...m, status: "pending", error: undefined, time: "Sending…" }
+              : m,
+          ),
+        };
+      }),
+    }));
+
+    if (isCloud) {
+      try {
+        await sendMessageBatchToFirestore(
+          threadId,
+          messageId,
+          msg.text,
+          callerUid,
+          callerName,
+          recipientId,
+          listingId,
+        );
+        setState((s) => ({
+          ...s,
+          threads: s.threads.map((t) => {
+            if (t.id !== threadId) return t;
+            return {
+              ...t,
+              messages: t.messages.map((m) =>
+                m.id === messageId ? { ...m, status: "sent", time: "Just now" } : m,
+              ),
+            };
+          }),
+        }));
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : "Failed to send message.";
+        setState((s) => ({
+          ...s,
+          threads: s.threads.map((t) => {
+            if (t.id !== threadId) return t;
+            return {
+              ...t,
+              messages: t.messages.map((m) =>
+                m.id === messageId ? { ...m, status: "error", error: errMsg } : m,
+              ),
+            };
+          }),
+        }));
+        throw err;
+      }
+      return;
+    }
+
+    setState((s) => ({
+      ...s,
+      threads: s.threads.map((t) => {
+        if (t.id !== threadId) return t;
+        return {
+          ...t,
+          messages: t.messages.map((m) =>
+            m.id === messageId ? { ...m, status: "sent", error: undefined, time: "Now" } : m,
+          ),
+        };
+      }),
+    }));
+  },
+
+  markThreadRead(threadId: string): void {
+    const now = Date.now();
+    setState((s) => ({
+      ...s,
+      lastReadTimestamps: {
+        ...s.lastReadTimestamps,
+        [threadId]: now,
+      },
     }));
   },
 
@@ -798,7 +1069,15 @@ export const actions = {
         const cachedProfile = getCachedProfile(creatorId);
         const callerName = cachedProfile?.name || authenticatedUser.displayName || "Student";
         const messageId = nextId("m");
-        await sendMessageBatchToFirestore(threadId, messageId, text.trim(), creatorId, callerName);
+        await sendMessageBatchToFirestore(
+          threadId,
+          messageId,
+          text.trim(),
+          creatorId,
+          callerName,
+          recipientId,
+          listingId,
+        );
       }
 
       return threadId;
@@ -893,7 +1172,15 @@ export const actions = {
     const cachedProfile = getCachedProfile(creatorId);
     const callerName = cachedProfile?.name || authenticatedUser.displayName || "Student";
     const messageId = nextId("m");
-    await sendMessageBatchToFirestore(threadId, messageId, trimmedText, creatorId, callerName);
+    await sendMessageBatchToFirestore(
+      threadId,
+      messageId,
+      trimmedText,
+      creatorId,
+      callerName,
+      recipientId,
+      listingId,
+    );
 
     return threadId;
   },
@@ -939,7 +1226,13 @@ export const actions = {
     const isCloud = threadId.startsWith("t_chat_") || threadId.startsWith("t_req_");
 
     if (isCloud) {
-      await updateThreadStatusInFirestore(threadId, newStatus, callerUid);
+      await updateThreadStatusInFirestore(
+        threadId,
+        newStatus,
+        callerUid,
+        thread.creatorId,
+        thread.listingId,
+      );
       setState((s) => ({
         ...s,
         threads: s.threads.map((t) => (t.id === threadId ? { ...t, status: newStatus } : t)),
@@ -998,7 +1291,16 @@ export const actions = {
 
     const isCloud = threadId.startsWith("t_chat_") || threadId.startsWith("t_req_");
     if (isCloud) {
-      await updateThreadStatusInFirestore(threadId, "completed", callerUid);
+      const otherParticipantId =
+        thread.participantIds?.find((id) => id !== callerUid) ??
+        (thread.creatorId === callerUid ? thread.recipientId : thread.creatorId);
+      await updateThreadStatusInFirestore(
+        threadId,
+        "completed",
+        callerUid,
+        otherParticipantId,
+        thread.listingId,
+      );
       setState((s) => ({
         ...s,
         threads: s.threads.map((t) => (t.id === threadId ? { ...t, status: "completed" } : t)),
@@ -1016,12 +1318,74 @@ export const actions = {
     }));
   },
 
+  markNotificationRead(notificationId: string): void {
+    const currentUid = activeAuthenticatedUid;
+    setState((s) => ({
+      ...s,
+      notifications: s.notifications.map((n) =>
+        n.id === notificationId ? { ...n, read: true } : n,
+      ),
+    }));
+
+    if (currentUid) {
+      void markNotificationReadInFirestore(currentUid, notificationId);
+    }
+  },
+
+  markThreadNotificationsRead(threadId: string): void {
+    const currentUid = activeAuthenticatedUid;
+    const targetNotifs = state.notifications.filter((n) => n.threadId === threadId && !n.read);
+    if (targetNotifs.length === 0) return;
+
+    setState((s) => ({
+      ...s,
+      notifications: s.notifications.map((n) =>
+        n.threadId === threadId ? { ...n, read: true } : n,
+      ),
+    }));
+
+    if (currentUid) {
+      const notifIds = targetNotifs.map((n) => n.id);
+      void markNotificationsForThreadReadInFirestore(currentUid, notifIds);
+    }
+  },
+
+  markAllNotificationsRead(): void {
+    const currentUid = activeAuthenticatedUid;
+    const unreadIds = state.notifications.filter((n) => !n.read).map((n) => n.id);
+    if (unreadIds.length === 0) return;
+
+    setState((s) => ({
+      ...s,
+      notifications: s.notifications.map((n) => ({ ...n, read: true })),
+    }));
+
+    if (currentUid) {
+      void markAllNotificationsReadInFirestore(currentUid, unreadIds);
+    }
+  },
+
+  dismissNotification(notificationId: string): void {
+    const currentUid = activeAuthenticatedUid;
+    setState((s) => ({
+      ...s,
+      notifications: s.notifications.filter((n) => n.id !== notificationId),
+    }));
+
+    if (currentUid) {
+      void deleteNotificationInFirestore(currentUid, notificationId);
+    }
+  },
+
   resetData() {
     setState(() => ({
       listings: seedListings,
       threads: seedThreads,
       reviews: seedReviews,
       completedThisSession: 0,
+      lastReadTimestamps: {},
+      notifications: [],
+      isNotificationsLoading: false,
     }));
   },
 };
@@ -1041,4 +1405,52 @@ if (typeof window !== "undefined") {
       };
     });
   });
+}
+
+/**
+ * Determines whether a thread has unread messages for the given active user.
+ */
+export function isThreadUnread(
+  thread: Thread,
+  currentUserId: string,
+  lastReadTimestamps: Record<string, number>,
+): boolean {
+  if (!currentUserId) return false;
+
+  // Verify participant
+  const isParticipant =
+    thread.participantIds?.includes(currentUserId) ||
+    thread.creatorId === currentUserId ||
+    thread.recipientId === currentUserId;
+  if (!isParticipant) return false;
+
+  // If the last message was sent by the current user, it is not unread for them
+  if (thread.lastMessageSenderId && thread.lastMessageSenderId === currentUserId) {
+    return false;
+  }
+
+  const lastMsg = thread.messages[thread.messages.length - 1];
+  if (lastMsg && (lastMsg.fromId === currentUserId || lastMsg.senderId === currentUserId)) {
+    return false;
+  }
+
+  // If there are no messages and no lastMessageText, not unread
+  if (!thread.lastMessageText && thread.messages.length === 0) {
+    return false;
+  }
+
+  // Determine timestamp of the latest activity
+  let lastTimeMillis = 0;
+  if (thread.lastMessageTime && typeof thread.lastMessageTime.toMillis === "function") {
+    lastTimeMillis = thread.lastMessageTime.toMillis();
+  } else if (lastMsg?.createdAt && typeof lastMsg.createdAt.toMillis === "function") {
+    lastTimeMillis = lastMsg.createdAt.toMillis();
+  } else if (thread.updatedAt && typeof thread.updatedAt.toMillis === "function") {
+    lastTimeMillis = thread.updatedAt.toMillis();
+  } else {
+    lastTimeMillis = thread.messages.length > 0 ? 1 : 0;
+  }
+
+  const readTime = lastReadTimestamps[thread.id] ?? 0;
+  return lastTimeMillis > readTime;
 }

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ImageOff } from "lucide-react";
+import { Clock, ImageOff } from "lucide-react";
 import { getStudent, timeAgo } from "@/lib/data";
 import type { Listing } from "@/lib/types";
 import { Avatar, MatchPill, priceLabel, TypeBadge } from "./ui-bits";
@@ -65,6 +65,12 @@ export function ListingCard({
           {listing.title}
         </h3>
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{listing.description}</p>
+        {listing.availability && (
+          <p className="mt-2 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+            <Clock className="size-3 shrink-0 text-primary" />
+            <span className="truncate">{listing.availability}</span>
+          </p>
+        )}
         <div className="mt-auto flex items-center justify-between border-t border-border pt-3.5 [margin-top:auto]">
           <div className="mt-3.5 flex items-center gap-2">
             <Avatar student={owner} className="size-6 text-[9px]" />

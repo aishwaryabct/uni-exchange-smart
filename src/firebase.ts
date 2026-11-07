@@ -17,17 +17,36 @@ import {
   updateDoc,
   serverTimestamp,
   Timestamp,
+  limit,
   type Firestore,
   type Unsubscribe,
 } from "firebase/firestore";
-import { getAuth, type Auth, type User } from "firebase/auth";
+import {
+  getAuth,
+  browserLocalPersistence,
+  setPersistence,
+  type Auth,
+  type User,
+} from "firebase/auth";
+import {
+  getStorage,
+  ref,
+  uploadBytesResumable,
+  getDownloadURL,
+  type FirebaseStorage,
+} from "firebase/storage";
 import { getAnalytics, isSupported, type Analytics } from "firebase/analytics";
-import type {
-  FirestoreChatMessage,
-  FirestoreThread,
-  Listing,
-  StudentProfile,
-  ThreadStatus,
+import {
+  type FirestoreChatMessage,
+  type FirestoreNotification,
+  type FirestoreThread,
+  type Listing,
+  type StudentProfile,
+  type ThreadStatus,
+  getDeterministicMessageNotificationId,
+  getDeterministicRequestNotificationId,
+  getDeterministicStatusNotificationId,
+  getDeterministicNotificationLink,
 } from "./lib/types";
 
 /**
@@ -128,6 +147,7 @@ export function isFirebaseConfigured(): boolean {
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
+let storage: FirebaseStorage | null = null;
 let analytics: Analytics | null = null;
 
 try {
@@ -135,6 +155,14 @@ try {
     app = getApps().length > 0 ? getApps()[0]! : initializeApp(firebaseConfig);
     db = getFirestore(app);
     auth = getAuth(app);
+    storage = getStorage(app);
+
+    // Enforce local browser persistence to prevent cross-origin iframe storage access prompts
+    if (typeof window !== "undefined" && auth) {
+      setPersistence(auth, browserLocalPersistence).catch((err) => {
+        console.warn("[Firebase] Could not set browserLocalPersistence:", err);
+      });
+    }
 
     // Initialize Analytics if supported in the current browser environment
     if (typeof window !== "undefined") {
@@ -153,7 +181,75 @@ try {
   console.warn("[Firebase] Initialization skipped or error:", err);
 }
 
-export { app, db, auth, analytics };
+export { app, db, auth, storage, analytics };
+
+export interface UploadProgressCallback {
+  (progressPercent: number): void;
+}
+
+/**
+ * Validates and uploads a real listing image to Firebase Storage.
+ * Restricts to safe image types (JPEG, PNG, WebP, GIF) and <= 5MB.
+ */
+export async function uploadListingImage(
+  file: File,
+  userId: string,
+  onProgress?: UploadProgressCallback,
+): Promise<string> {
+  if (!storage || !isFirebaseConfigured()) {
+    throw new Error("Firebase Storage is not initialized or configured.");
+  }
+
+  const validTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+  if (!validTypes.includes(file.type)) {
+    throw new Error("Invalid file type. Please upload a JPEG, PNG, WebP, or GIF image.");
+  }
+
+  const MAX_SIZE_BYTES = 5 * 1024 * 1024;
+  if (file.size > MAX_SIZE_BYTES) {
+    throw new Error("Image file size exceeds the 5MB limit. Please choose a smaller photo.");
+  }
+
+  const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const uniquePath = `listings/${userId}/${Date.now()}_${cleanFileName}`;
+  const storageRef = ref(storage, uniquePath);
+
+  const uploadTask = uploadBytesResumable(storageRef, file, {
+    contentType: file.type,
+    customMetadata: {
+      uploadedBy: userId,
+      originalName: file.name,
+    },
+  });
+
+  return new Promise((resolve, reject) => {
+    uploadTask.on(
+      "state_changed",
+      (snapshot) => {
+        if (snapshot.totalBytes > 0 && onProgress) {
+          const percent = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          onProgress(percent);
+        }
+      },
+      (error) => {
+        console.error("[Firebase Storage] Upload failed:", error);
+        reject(
+          new Error(
+            `Failed to upload photo: ${error.message || "Storage error. Please check your connection."}`,
+          ),
+        );
+      },
+      async () => {
+        try {
+          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+          resolve(downloadUrl);
+        } catch (err) {
+          reject(err);
+        }
+      },
+    );
+  });
+}
 
 /**
  * Returns the currently signed-in Firebase user, or null if unauthenticated.
@@ -166,6 +262,7 @@ export const USERS_COLLECTION = "users";
 export const LISTINGS_COLLECTION = "listings";
 export const THREADS_COLLECTION = "threads";
 export const MESSAGES_SUBCOLLECTION = "messages";
+export const NOTIFICATIONS_SUBCOLLECTION = "notifications";
 
 /**
  * Save or update a student profile document in the Firestore "users" collection.
@@ -372,6 +469,7 @@ export async function getOrCreateThreadInFirestore(
     throw new Error("[Firebase] Firestore is not initialized or configured.");
   }
 
+  const firestoreDb = db;
   const currentAuthUser = getCurrentUser();
   if (!currentAuthUser) {
     throw new Error("[Firebase] Authentication required to create or access conversation threads.");
@@ -392,9 +490,11 @@ export async function getOrCreateThreadInFirestore(
     threadData.recipientId,
   );
 
-  const threadRef = doc(db, THREADS_COLLECTION, threadId);
+  const threadRef = doc(firestoreDb, THREADS_COLLECTION, threadId);
 
-  return await runTransaction(db, async (transaction) => {
+  let isNewThread = false;
+
+  const resultThread = await runTransaction(firestoreDb, async (transaction) => {
     const threadSnap = await transaction.get(threadRef);
 
     if (threadSnap.exists()) {
@@ -461,6 +561,7 @@ export async function getOrCreateThreadInFirestore(
         );
       }
 
+      isNewThread = false;
       return existing;
     }
 
@@ -485,6 +586,7 @@ export async function getOrCreateThreadInFirestore(
     };
 
     transaction.set(threadRef, newDocData);
+    isNewThread = true;
 
     return {
       ...newDocData,
@@ -492,6 +594,55 @@ export async function getOrCreateThreadInFirestore(
       updatedAt: Timestamp.now(),
     } as FirestoreThread;
   });
+
+  // Attempt notification creation separately for newly created exchange requests
+  if (
+    isNewThread &&
+    threadData.kind === "request" &&
+    threadData.recipientId !== threadData.creatorId
+  ) {
+    const notifId = getDeterministicRequestNotificationId(
+      threadData.listingId,
+      threadData.creatorId,
+    );
+    const notifRef = doc(
+      firestoreDb,
+      USERS_COLLECTION,
+      threadData.recipientId,
+      NOTIFICATIONS_SUBCOLLECTION,
+      notifId,
+    );
+    try {
+      await setDoc(notifRef, {
+        id: notifId,
+        recipientId: threadData.recipientId,
+        senderId: threadData.creatorId,
+        type: "request_received",
+        title: "New Exchange Request",
+        body: "You received an exchange request for your listing.",
+        link: getDeterministicNotificationLink(threadId),
+        read: false,
+        createdAt: serverTimestamp(),
+        threadId,
+        listingId: threadData.listingId,
+      });
+    } catch (err: unknown) {
+      const isPermissionDenied = (err as { code?: string })?.code === "permission-denied";
+      if (isPermissionDenied) {
+        console.warn(
+          `[Firebase] Request notification write for listing ${threadData.listingId} was rejected by security rules. Thread ${threadId} was created successfully:`,
+          err,
+        );
+      } else {
+        console.error(
+          `[Firebase] Failed to create request notification for thread ${threadId}:`,
+          err,
+        );
+      }
+    }
+  }
+
+  return resultThread;
 }
 
 /**
@@ -517,6 +668,8 @@ export async function sendMessageBatchToFirestore(
   text: string,
   callerUid: string,
   callerName?: string,
+  recipientId?: string,
+  listingId?: string,
 ): Promise<void> {
   if (!db || !isFirebaseConfigured()) {
     throw new Error("[Firebase] Firestore is not initialized or configured.");
@@ -571,17 +724,52 @@ export async function sendMessageBatchToFirestore(
   // 2. Thread Summary update: /threads/{threadId}
   // Rules require Operation A: lastMessageId, lastMessageText, lastMessageTime, lastMessageSenderId, updatedAt
   const threadRef = doc(db, THREADS_COLLECTION, threadId);
-  batch.update(threadRef, {
+  const threadUpdateData = {
     lastMessageId: cleanMessageId,
     lastMessageText: cleanText,
     lastMessageTime: now,
     lastMessageSenderId: callerUid,
     updatedAt: now,
-  });
+  };
+  batch.update(threadRef, threadUpdateData);
+
+  // 3. Atomically write message notification to recipient if specified and not self-sending
+  if (recipientId && recipientId !== callerUid) {
+    const notifId = getDeterministicMessageNotificationId(threadId, cleanMessageId);
+    const notifRef = doc(db, USERS_COLLECTION, recipientId, NOTIFICATIONS_SUBCOLLECTION, notifId);
+    const clampedCallerName = callerName ? callerName.slice(0, 80) : undefined;
+    const notifData = {
+      id: notifId,
+      recipientId,
+      senderId: callerUid,
+      type: "message" as const,
+      title: clampedCallerName ? `New message from ${clampedCallerName}` : "New message",
+      body: cleanText.length > 100 ? `${cleanText.slice(0, 97)}...` : cleanText,
+      link: getDeterministicNotificationLink(threadId),
+      read: false,
+      createdAt: now,
+      threadId,
+      ...(listingId ? { listingId } : {}),
+    };
+    batch.set(notifRef, notifData);
+  }
 
   try {
     await batch.commit();
-  } catch (err) {
+  } catch (err: unknown) {
+    // If notification creation is rejected by remote security rules, fallback to message+thread batch
+    const isPermissionError = (err as { code?: string })?.code === "permission-denied";
+    if (isPermissionError && recipientId) {
+      console.warn(
+        "[Firebase] Notification write rejected by remote rules. Committing message without notification doc:",
+        err,
+      );
+      const fallbackBatch = writeBatch(db);
+      fallbackBatch.set(messageRef, messageData);
+      fallbackBatch.update(threadRef, threadUpdateData);
+      await fallbackBatch.commit();
+      return;
+    }
     console.error(`[Firebase] Failed to send message in thread ${threadId}:`, err);
     throw err;
   }
@@ -595,6 +783,8 @@ export async function updateThreadStatusInFirestore(
   threadId: string,
   newStatus: ThreadStatus,
   callerUid: string,
+  recipientId?: string,
+  listingId?: string,
 ): Promise<void> {
   if (!db || !isFirebaseConfigured()) {
     throw new Error("[Firebase] Firestore is not initialized or configured.");
@@ -611,12 +801,87 @@ export async function updateThreadStatusInFirestore(
 
   const threadRef = doc(db, THREADS_COLLECTION, threadId);
 
+  // If no recipient notification is requested, update thread doc directly
+  if (
+    !recipientId ||
+    recipientId === callerUid ||
+    !["accepted", "declined", "completed"].includes(newStatus)
+  ) {
+    try {
+      await updateDoc(threadRef, {
+        status: newStatus,
+        updatedAt: serverTimestamp(),
+      });
+      return;
+    } catch (err) {
+      console.error(`[Firebase] Failed to update thread ${threadId} status to ${newStatus}:`, err);
+      throw err;
+    }
+  }
+
+  // Atomically update thread status and write notification in a writeBatch
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+
+  batch.update(threadRef, {
+    status: newStatus,
+    updatedAt: now,
+  });
+
+  const notifType =
+    newStatus === "accepted"
+      ? "request_accepted"
+      : newStatus === "declined"
+        ? "request_declined"
+        : "exchange_completed";
+  const notifId = getDeterministicStatusNotificationId(
+    threadId,
+    newStatus as "accepted" | "declined" | "completed",
+  );
+  const notifRef = doc(db, USERS_COLLECTION, recipientId, NOTIFICATIONS_SUBCOLLECTION, notifId);
+  const title =
+    newStatus === "accepted"
+      ? "Exchange Request Accepted"
+      : newStatus === "declined"
+        ? "Exchange Request Declined"
+        : "Exchange Completed";
+  const body =
+    newStatus === "accepted"
+      ? "Your exchange request was accepted."
+      : newStatus === "declined"
+        ? "Your exchange request was declined."
+        : "An exchange has been marked as completed.";
+
+  batch.set(notifRef, {
+    id: notifId,
+    recipientId,
+    senderId: callerUid,
+    type: notifType,
+    title,
+    body,
+    link: getDeterministicNotificationLink(threadId),
+    read: false,
+    createdAt: now,
+    threadId,
+    ...(listingId ? { listingId } : {}),
+  });
+
   try {
-    await updateDoc(threadRef, {
-      status: newStatus,
-      updatedAt: serverTimestamp(),
-    });
-  } catch (err) {
+    await batch.commit();
+  } catch (err: unknown) {
+    // If notification creation is rejected by remote security rules, fallback to thread status update
+    const isPermissionError = (err as { code?: string })?.code === "permission-denied";
+    if (isPermissionError) {
+      console.warn(
+        "[Firebase] Status notification write rejected by remote rules. Committing thread update without notification doc:",
+        err,
+      );
+      await updateDoc(threadRef, {
+        status: newStatus,
+        updatedAt: serverTimestamp(),
+      });
+      return;
+    }
     console.error(`[Firebase] Failed to update thread ${threadId} status to ${newStatus}:`, err);
     throw err;
   }
@@ -703,4 +968,112 @@ export function subscribeToThreadMessages(
       onError?.(err);
     },
   );
+}
+
+/**
+ * Real-time listener for user in-app notifications.
+ * Uses bounded query with limit(50) ordered by createdAt descending.
+ * Returns an Unsubscribe function.
+ */
+export function subscribeToUserNotifications(
+  uid: string,
+  onUpdate: (notifications: FirestoreNotification[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  if (!db || !isFirebaseConfigured() || typeof window === "undefined") {
+    return () => {};
+  }
+
+  const colRef = collection(db, USERS_COLLECTION, uid, NOTIFICATIONS_SUBCOLLECTION);
+  const q = query(colRef, orderBy("createdAt", "desc"), limit(50));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const notifications: FirestoreNotification[] = [];
+      snapshot.forEach((d) => {
+        notifications.push(d.data() as FirestoreNotification);
+      });
+      onUpdate(notifications);
+    },
+    (err) => {
+      console.error(`[Firebase] Error in notifications listener for user ${uid}:`, err);
+      onError?.(err);
+    },
+  );
+}
+
+/**
+ * Marks a single notification as read in Firestore.
+ */
+export async function markNotificationReadInFirestore(
+  userId: string,
+  notificationId: string,
+): Promise<void> {
+  if (!db || !isFirebaseConfigured()) return;
+  try {
+    const docRef = doc(db, USERS_COLLECTION, userId, NOTIFICATIONS_SUBCOLLECTION, notificationId);
+    await updateDoc(docRef, { read: true });
+  } catch (err) {
+    console.warn(
+      `[Firebase] Failed to mark notification ${notificationId} as read in Firestore:`,
+      err,
+    );
+  }
+}
+
+/**
+ * Marks multiple notifications as read for a given conversation thread in Firestore.
+ */
+export async function markNotificationsForThreadReadInFirestore(
+  userId: string,
+  notificationIds: string[],
+): Promise<void> {
+  if (!db || !isFirebaseConfigured() || notificationIds.length === 0) return;
+  try {
+    const batch = writeBatch(db);
+    for (const notifId of notificationIds) {
+      const docRef = doc(db, USERS_COLLECTION, userId, NOTIFICATIONS_SUBCOLLECTION, notifId);
+      batch.update(docRef, { read: true });
+    }
+    await batch.commit();
+  } catch (err) {
+    console.warn(`[Firebase] Failed to batch-mark thread notifications as read in Firestore:`, err);
+  }
+}
+
+/**
+ * Marks all specified notifications as read in Firestore.
+ */
+export async function markAllNotificationsReadInFirestore(
+  userId: string,
+  notificationIds: string[],
+): Promise<void> {
+  if (!db || !isFirebaseConfigured() || notificationIds.length === 0) return;
+  try {
+    const batch = writeBatch(db);
+    for (const notifId of notificationIds) {
+      const docRef = doc(db, USERS_COLLECTION, userId, NOTIFICATIONS_SUBCOLLECTION, notifId);
+      batch.update(docRef, { read: true });
+    }
+    await batch.commit();
+  } catch (err) {
+    console.warn(`[Firebase] Failed to batch-mark all notifications as read in Firestore:`, err);
+  }
+}
+
+/**
+ * Deletes/dismisses a single notification from Firestore.
+ */
+export async function deleteNotificationInFirestore(
+  userId: string,
+  notificationId: string,
+): Promise<void> {
+  if (!db || !isFirebaseConfigured()) return;
+  try {
+    const docRef = doc(db, USERS_COLLECTION, userId, NOTIFICATIONS_SUBCOLLECTION, notificationId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.warn(`[Firebase] Failed to delete notification ${notificationId} in Firestore:`, err);
+  }
 }
